@@ -15,9 +15,10 @@ from sklearn.preprocessing import OneHotEncoder
 from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn import svm
 from sklearn import preprocessing
+from sklearn.feature_selection import VarianceThreshold
 import matplotlib.pyplot as plt
 from word_forms.word_forms import get_word_forms
-
+from sklearn.linear_model import Ridge
 from transformers import BertTokenizer, BertModel
 import torch
 
@@ -26,7 +27,6 @@ model = BertModel.from_pretrained("bert-base-uncased")
 
 ps = PorterStemmer()
 lemmatizer = WordNetLemmatizer()
-
 
 
 def parse_triplets(triplets: str) -> Sequence[Tuple[str, str, str]]:
@@ -38,6 +38,7 @@ def parse_triplets(triplets: str) -> Sequence[Tuple[str, str, str]]:
 
 def get_first_triplet(triplets: Sequence[Tuple[str, str, str]]):
     return next(iter(triplets), ("", "", ""))
+
 
 def get_sentence_match_triplet(triplets: Sequence[Tuple[str, str, str]], sentence: str):
     if "people" in sentence.split():
@@ -76,14 +77,17 @@ def read_SVO_CLIP_results_file():
     df = df.sort_index()
     df['index'] = df.index
     results = []
-    for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction in zip(df['index'], df['sentence'],
-                                                                                    df['neg_sentence'],
-                                                                                    df['pos_triplet'],
-                                                                                    df['neg_triplet'],
-                                                                                    df['neg_type'],  # s, v or o
-                                                                                    df['clip prediction']):
+    for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction, clip_score_diff in \
+                                                                                                zip(df['index'],
+                                                                                                  df['sentence'],
+                                                                                                  df['neg_sentence'],
+                                                                                                  df['pos_triplet'],
+                                                                                                  df['neg_triplet'],
+                                                                                                  df['neg_type'],
+                                                                                                  df['clip prediction'],
+                                                                                                  df['clip_score_diff']):
 
-        sentence = pre_process_sentences(sentence) #remove punctuation
+        sentence = pre_process_sentences(sentence)  # remove punctuation
         neg_sentence = pre_process_sentences(neg_sentence)
 
         parsed_pos_triplet = parse_triplets(pos_triplet)
@@ -94,20 +98,23 @@ def read_SVO_CLIP_results_file():
         match_pos_triplet = get_sentence_match_triplet(parsed_pos_triplet, sentence)
         match_neg_triplet = get_sentence_match_triplet(parsed_neg_triplet, neg_sentence)
 
-        results.append([index, sentence, neg_sentence, match_pos_triplet, match_neg_triplet, neg_type[0], clip_prediction])
+        results.append(
+            [index, sentence, neg_sentence, match_pos_triplet, match_neg_triplet, neg_type[0], clip_prediction, clip_score_diff])
 
     return results
 
 
 def parse_liwc_file():
     dict_liwc = {}
+    liwc_categ = set()
     with open('data/LIWC.2015.all.txt') as file:
         for line in file:
             word, category = [w.strip() for w in line.strip().split(",")]
             if word not in dict_liwc:
                 dict_liwc[word] = []
             dict_liwc[word].append(category)
-    return dict_liwc
+            liwc_categ.add(category)
+    return dict_liwc, liwc_categ
 
 
 def parse_concreteness_file():
@@ -159,6 +166,7 @@ def get_wup_similarity(word_changed, word_inplace, pos):
     wup_similarity_value = syn1.wup_similarity(syn2)
     return wup_similarity_value
 
+
 def compute_embedding(word_type, sentence):
     if sentence:
         inputs = tokenizer(sentence, return_tensors="pt")
@@ -177,19 +185,20 @@ def compute_embedding(word_type, sentence):
                     break
         if token_ids:
             index_word = [inputs['input_ids'].tolist()[0].index(token_id) for token_id in token_ids]
-        else: # treat as separate word / not part of a sentence
+        else:  # treat as separate word / not part of a sentence
             inputs = tokenizer(word_type, return_tensors="pt")
             index_word = [1]
-    else: # treat as separate word / not part of a sentence
+    else:  # treat as separate word / not part of a sentence
         inputs = tokenizer(word_type, return_tensors="pt")
         index_word = [1]
 
     with torch.no_grad():
         outputs = model(**inputs)
 
-    embedding_word = np.mean(outputs.last_hidden_state.detach().numpy()[0][index_word[0]:index_word[-1]+1], axis=0)
+    embedding_word = np.mean(outputs.last_hidden_state.detach().numpy()[0][index_word[0]:index_word[-1] + 1], axis=0)
     embedding_word = np.expand_dims(embedding_word, axis=0)
     return embedding_word
+
 
 def save_BERT_embeddings(list_word_sentence):
     dict_data = {}
@@ -198,6 +207,7 @@ def save_BERT_embeddings(list_word_sentence):
         dict_data[(word, sentence)] = embedding_word
 
     np.save("data/bert_embeddings.npy", dict_data)
+
 
 def get_cosine_similarity(word_changed, word_inplace, sentence, neg_sentence, bert_embeddings):
     embedding_word_changed = bert_embeddings[(word_changed, sentence)]
@@ -215,38 +225,45 @@ def get_concreteness_score(word, dict_concreteness):
 
 def parse_levin_file():
     content = ""
-    levin_dict = {}
+    levin_dict, compressed_levin_dict = {}, {}
     with open('data/levin_verbs.txt') as file:
         for line in file:
             line = line.lstrip()
             if line and line[0].isnumeric():
                 key = " ".join(line.split())
+                key_compressed = key.split(" ")[0].split(".")[0]
+                if key_compressed not in compressed_levin_dict:
+                    compressed_levin_dict[key_compressed] = []
             else:
                 if not line:
                     if '-*-' not in content:
                         levin_dict[key] = [x.lower() for x in content.split()]
+                        for k in levin_dict[key]:
+                            compressed_levin_dict[key_compressed].append(k)
                     content = ""
                 else:
                     content += line.replace('\r\n', "").rstrip()
                     content += " "
-    return levin_dict
+    return levin_dict, compressed_levin_dict
 
 
 def map_levin_keys():
     map_keys = {}
     index = 1
-    levin_dict = parse_levin_file()
-    for key in levin_dict.keys():
+    levin_dict, compressed_levin_dict = parse_levin_file()
+
+    # for key in levin_dict.keys():
+    for key in compressed_levin_dict.keys():
         map_keys[key] = index
         index += 1
-    print(f"There are {index} verb Levin classes")  # TODO: Compress classes?
     return map_keys
 
 
 def get_levin_class_per_verb(verb):
-    levin_dict = parse_levin_file()
+    levin_dict, compressed_levin_dict = parse_levin_file()
     levin_classes = []
-    for key, values in levin_dict.items():
+    # for key, values in levin_dict.items():
+    for key, values in compressed_levin_dict.items():
         if verb in values:
             levin_classes.append(key)
     return levin_classes
@@ -265,28 +282,39 @@ def transform_features(df):
     pos_categ = ohe.categories_[0].tolist()
 
     mlb = MultiLabelBinarizer()
-    one_hot_levin = mlb.fit_transform(df['Levin'])
+    df_concat = pd.concat([df['Levin-change'], df['Levin-inplace']])
+    one_hot_levin = mlb.fit_transform(df_concat)
+    one_hot_levin_change, one_hot_levin_inplace = np.split(one_hot_levin, 2)
     levin_classes_indexes = mlb.classes_.tolist()
     map_keys = map_levin_keys()
     levin_classes = [key for index in levin_classes_indexes for (key, value) in map_keys.items() if value == index]
     # print(pd.DataFrame(one_hot_levin, columns=mlb.classes_, index=df.index).to_string())
 
     mlb = MultiLabelBinarizer()
-    one_hot_liwc = mlb.fit_transform(df['LIWC'])
+    df_concat = pd.concat([df['LIWC-change'], df['LIWC-inplace']])
+    one_hot_liwc = mlb.fit_transform(df_concat)
+    one_hot_liwc_change, one_hot_liwc_inplace = np.split(one_hot_liwc, 2)
     liwc_classes = mlb.classes_.tolist()
 
-    int_concreteness = df['concreteness'].to_numpy()
-    int_concreteness = np.expand_dims(int_concreteness, axis=1)
+    concret_w_change = df['concret-change'].to_numpy()
+    concret_w_change = np.expand_dims(concret_w_change, axis=1)
+    concret_w_inplace = df['concret-inplace'].to_numpy()
+    concret_w_inplace = np.expand_dims(concret_w_inplace, axis=1)
 
-    cosine_sim = df['cosine_sim'].to_numpy()
+    cosine_sim = df['cosine-sim'].to_numpy()
     cosine_sim = np.expand_dims(cosine_sim, axis=1)
 
     # wup_sim = df['wup_sim'].to_numpy() #TODO: What to do with words with no synsets?
     # wup_sim = np.expand_dims(wup_sim, axis=1)
 
-    feature_names = ["POS_" + str(i) for i in pos_categ] + ["Levin_" + str(i) for i in levin_classes] + [
-        "LIWC_" + str(i) for i in liwc_classes] + ["Concreteness", "cosine_sim"]
-    return one_hot_pos, one_hot_levin, one_hot_liwc, int_concreteness, cosine_sim, feature_names
+    feature_names = ["POS_" + str(i) for i in pos_categ] + \
+                    ["Levin-change_" + str(i) for i in levin_classes] + ["Levin-inplace_" + str(i) for i in
+                                                                         levin_classes] + \
+                    ["LIWC-change_" + str(i) for i in liwc_classes] + ["LIWC-inplace_" + str(i) for i in liwc_classes] + \
+                    ["concret-change", "concret-inplace", "cosine-sim"]
+
+    return one_hot_pos, one_hot_levin_change, one_hot_levin_inplace, one_hot_liwc_change, one_hot_liwc_inplace, \
+           concret_w_change, concret_w_inplace, cosine_sim, feature_names
 
 
 def get_changed_word(pos_triplet, neg_triplet, neg_type):
@@ -314,17 +342,22 @@ def get_bert_data(clip_results):
     save_BERT_embeddings(list_word_sentence)
 
 
-
 def get_all_properties(clip_results):
-    dict_properties = {"index": [], "sent": [], "n_sent": [], "word_changed": [], "word_inplace": [], "POS": [], "Levin": [], "LIWC": [],
-                       "concreteness": [], "cosine_sim": [], "label": []}
+    # dict_properties = {"index": [], "sent": [], "n_sent": [], "word_changed": [], "word_inplace": [], "POS": [],
+    #                    "Levin_w_change": [], "Levin_w_inplace": [], "LIWC_w_change": [], "LIWC_w_inplace": [],
+    #                    "concreteness_w_change": [], "concreteness_w_inplace": [], "cosine_sim": [], "label": []}
+
+    dict_properties = {"index": [], "sent": [], "n_sent": [], "word_changed": [], "word_inplace": [], "POS": [],
+                       "Levin-change": [], "Levin-inplace": [], "LIWC-change": [], "LIWC-inplace": [],
+                       "concret-change": [], "concret-inplace": [], "cosine-sim": [], "label": [], "clip-score-diff":[]}
+
     map_keys = map_levin_keys()
-    dict_liwc = parse_liwc_file()
+    dict_liwc, _ = parse_liwc_file()
     dict_concreteness = parse_concreteness_file()
-    # nb_no_liwc = 0
-    bert_embeddings = np.load("data/bert_embeddings.npy", allow_pickle=True).item() # transform from ndarray to dict
-    # clip_results = clip_results[:10]
-    for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction in tqdm(clip_results):
+    bert_embeddings = np.load("data/bert_embeddings.npy", allow_pickle=True).item()  # transform from ndarray to dict
+
+    # clip_results = clip_results[:1000]
+    for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction, clip_score_diff in tqdm(clip_results):
         word_changed, word_inplace = get_changed_word(pos_triplet, neg_triplet, neg_type)
 
         if not word_inplace or not word_changed:
@@ -333,17 +366,19 @@ def get_all_properties(clip_results):
 
         # wnet_sim = get_wup_similarity(word_changed, word_inplace, neg_type)
         cosine_sim = get_cosine_similarity(word_changed, word_inplace, sentence, neg_sentence, bert_embeddings)
+        # cosine_sim = 0
 
         if neg_type == 'v':
-            levin_classes = get_verb_properties(word_changed, map_keys)
+            levin_classes_w_changed = get_verb_properties(word_changed, map_keys)
+            levin_classes_w_inplace = get_verb_properties(word_inplace, map_keys)
         else:
-            levin_classes = []
-        liwc_category = get_liwc_category(word_changed, dict_liwc)
-        concreteness_score = get_concreteness_score(word_changed, dict_concreteness)
-        # if not liwc_category:
-        # if not concreteness_score:
-        #     nb_no_liwc += 1
-        #     print(word)
+            levin_classes_w_changed, levin_classes_w_inplace = [], []
+
+        liwc_category_w_changed = get_liwc_category(word_changed, dict_liwc)
+        liwc_category_w_inplace = get_liwc_category(word_inplace, dict_liwc)
+
+        concret_w_change = get_concreteness_score(word_changed, dict_concreteness)
+        concret_w_inplace = get_concreteness_score(word_inplace, dict_concreteness)
 
         dict_properties["index"].append(index)
         dict_properties["sent"].append(sentence)
@@ -351,30 +386,44 @@ def get_all_properties(clip_results):
         dict_properties["word_changed"].append(word_changed)
         dict_properties["word_inplace"].append(word_inplace)
         dict_properties["POS"].append(neg_type)
-        dict_properties["Levin"].append(levin_classes)
-        dict_properties["LIWC"].append(liwc_category)
-        dict_properties["concreteness"].append(concreteness_score)
-        dict_properties["cosine_sim"].append(cosine_sim)
+        # dict_properties["Levin"].append(levin_classes_w_changed)
+        dict_properties["Levin-change"].append(levin_classes_w_changed)
+        dict_properties["Levin-inplace"].append(levin_classes_w_inplace)
+        # dict_properties["LIWC"].append(liwc_category_w_changed)
+        dict_properties["LIWC-change"].append(liwc_category_w_changed)
+        dict_properties["LIWC-inplace"].append(liwc_category_w_inplace)
+        # dict_properties["concreteness"].append(concreteness_score_w_changed)
+        dict_properties["concret-change"].append(concret_w_change)
+        dict_properties["concret-inplace"].append(concret_w_inplace)
+        dict_properties["cosine-sim"].append(cosine_sim)
         # dict_properties["wup_sim"].append(wnet_sim)
         # dict_properties["WordNet"].append(wnet_category)
 
         # TODO: predict when CLIP result is pos or neg? - I think we want to learn when CLIP fails
-        # dict_properties["label"].append(0 if clip_prediction == 'pos' else 1)
-        dict_properties["label"].append(1 if clip_prediction == 'pos' else 0)
+        dict_properties["label"].append(0 if clip_prediction == 'pos' else 1)
+        # dict_properties["label"].append(1 if clip_prediction == 'pos' else 0)
+        dict_properties["clip-score-diff"].append(clip_score_diff)
+
 
     df = pd.DataFrame.from_dict(dict_properties)
     # print(df.to_string())
-    # nb_total = len(dict_properties["index"])
-    # print(f"There are {nb_no_liwc} examples with no LIWC category from {nb_total}")
     return df
 
 
-def pre_process_features(one_hot_pos, one_hot_levin, int_concreteness, cosine_sim):
-    # print(one_hot_pos.shape, one_hot_levin.shape, int_concreteness.shape)
-    all_features = np.concatenate((one_hot_pos, one_hot_levin, int_concreteness, cosine_sim), axis=1)
+def pre_process_features(one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
+                         one_hot_liwc_change, one_hot_liwc_inplace,
+                         concret_w_change, concret_w_inplace, cosine_sim):
+    all_features = np.concatenate((one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
+                                   one_hot_liwc_change, one_hot_liwc_inplace, concret_w_change,
+                                   concret_w_inplace, cosine_sim), axis=1)
     # standardize features
     scaler = preprocessing.StandardScaler().fit(all_features)
     features_scaled = scaler.transform(all_features)
+    print(f"feature scaled size: {features_scaled.shape}")
+
+    sel = VarianceThreshold(threshold=(.8 * (1 - .8)))
+    features_remove_low_var = sel.fit_transform(features_scaled)
+    print(f"feature after remove low var size: {features_remove_low_var.shape}")
     return features_scaled
 
 
@@ -401,9 +450,21 @@ def run_SVM(feat_train, labels_train, feat_test, labels_test):
     method.fit(feat_train, labels_train)
     coef_weights = method.coef_  # Weights assigned to the features when kernel="linear"
     predicted = method.predict(feat_test)
-    evaluate(method_name, labels_test, predicted)
+    evaluate(method_name, labels_test, predicted) #TODO - MIGHT NOT NEED TO TEST?
     return coef_weights
 
+def run_regression(features_scaled, df):
+    method = Ridge() #normalize=False as we input features_scaled
+
+    # all_clip_scores = df['clip-score-diff'].to_numpy()
+    all_clip_labels = df['label'].to_numpy()
+    method.fit(features_scaled, all_clip_labels)
+    score = method.score(features_scaled, all_clip_labels) #Return the coefficient of determination
+    print(f"Ridge regression score: {score:.2f}")
+    coef_weights = method.coef_
+    # predicted = method.predict(feat_test)
+    # evaluate(method_name, labels_test, predicted)
+    return coef_weights
 
 def plot_coef_weights(coef_weights, feature_names):
     top_features = 5
@@ -422,14 +483,15 @@ def plot_coef_weights(coef_weights, feature_names):
 
 # https://www.kaggle.com/code/pierpaolo28/pima-indians-diabetes-database/notebook
 def print_sorted_coef_weights(coef_weights, feature_names):
-    coef = coef_weights.ravel()  # flatten array
+    coef = abs(coef_weights.ravel())
+    # coef = coef_weights.ravel()  # flatten array
     sorted_coefficients_idx = np.argsort(coef)[::-1]  # in descending order
     sorted_coefficients = [np.round(weight, 2) for weight in coef[sorted_coefficients_idx]]
 
     feature_names = np.array(feature_names)
     sorted_feature_names = feature_names[sorted_coefficients_idx]
 
-    df = pd.DataFrame(zip(sorted_feature_names, sorted_coefficients), columns=['Feature', 'Weight'])
+    df = pd.DataFrame(zip(sorted_feature_names, sorted_coefficients), columns=['Feature', 'Weight (abs)'])
     df.to_csv("data/sorted_features.csv", index=False)
 
 
@@ -441,8 +503,8 @@ def evaluate(method_name, labels_test, predicted):
     roc_auc = roc_auc_score(labels_test, predicted) * 100
     print(
         f"Method {method_name}, A: {accuracy:.2f}, P: {precision:.2f}, R: {recall:.2f}, F1: {f1:.2f}, ROC-AUC: {roc_auc:.2f}")
-    print(Counter(predicted))
-    print(Counter(labels_test))
+    print(f"Counter predicted: {Counter(predicted)}")
+    print(f"Counter GT: {Counter(labels_test)}")
 
 
 def print_metrics(df, feature_names):
@@ -450,6 +512,11 @@ def print_metrics(df, feature_names):
     print(f"Counter all labels: {Counter(df['label'].tolist())}")
     print(f"Data size: {len(df['index'].tolist())}")
     print(f"Features size: {len(feature_names)}, {Counter(main_feature_names)}")
+
+    levin_dict, compressed_levin_dict = parse_levin_file()
+    print(f"Levin total nb classes: {len(compressed_levin_dict.keys())}")
+    liwc_dict, liwc_categ = parse_liwc_file()
+    print(f"LIWC total nb classes: {len(liwc_categ)}")
 
 
 def merge_csvs_and_filter_data():
@@ -478,14 +545,21 @@ if __name__ == "__main__":
     clip_results = read_SVO_CLIP_results_file()
     # get_bert_data(clip_results)
     df = get_all_properties(clip_results)
-    # one_hot_pos, one_hot_levin, one_hot_liwc, concreteness, cosine_sim, feature_names = transform_features(df)
-    # print_metrics(df, feature_names)
-    #
-    # features_scaled = pre_process_features(one_hot_pos, one_hot_levin, concreteness, cosine_sim)
-    # feat_train, labels_train, feat_test, labels_test = eval_split(features_scaled, df)
-    #
-    # coef_weights = run_SVM(feat_train, labels_train, feat_test, labels_test)
-    # print_sorted_coef_weights(coef_weights, feature_names)
-    # # plot_coef_weights(coef_weights, feature_names)
-    #
-    # # majority_class(labels_test)
+
+    one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace, one_hot_liwc_change, one_hot_liwc_inplace, \
+    concret_w_change, concret_w_inplace, cosine_sim, feature_names = transform_features(df)
+
+    print_metrics(df, feature_names)
+
+    features_scaled = pre_process_features(one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
+                                           one_hot_liwc_change, one_hot_liwc_inplace,
+                                           concret_w_change, concret_w_inplace, cosine_sim)
+
+    feat_train, labels_train, feat_test, labels_test = eval_split(features_scaled, df)
+
+    coef_weights = run_SVM(feat_train, labels_train, feat_test, labels_test)
+    # coef_weights = run_regression(features_scaled, df)
+    print_sorted_coef_weights(coef_weights, feature_names)
+    # # # plot_coef_weights(coef_weights, feature_names)
+    # #
+    # majority_class(labels_test)
