@@ -8,5 +8,6 @@
 #SBATCH --account=mihalcea0
 #SBATCH --partition=standard
 
-source .venv/bin/activate
+module load python/3.10.4
+source venv/bin/activate
 python main.py

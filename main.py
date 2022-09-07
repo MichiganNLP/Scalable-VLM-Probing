@@ -440,7 +440,7 @@ def get_features(clip_results, path: str = "data/bert_embeddings.npy",
         # dict_features["label"].append(1 if clip_prediction == 'pos' else 0)
         dict_features["clip-score-diff"].append(clip_score_diff)
 
-    levin_liwc = [item for sublist in dict_features["Levin-change"] + dict_features["Levin-inplace"] + \
+    levin_liwc = [item for sublist in dict_features["Levin-change"] + dict_features["Levin-inplace"] +
                   dict_features["LIWC-change"] + dict_features["LIWC-inplace"] for item in sublist]
     features_count = levin_liwc + ["POS-" + v for v in dict_features["POS"]] + \
                      ["cosine-sim"] * len(dict_features["cosine-sim"]) + \
@@ -498,10 +498,10 @@ def majority_class(labels_test: np.ndarray) -> None:
 def run_svm(feat_train: np.ndarray, labels_train: np.ndarray, feat_test: np.ndarray,
             labels_test: np.ndarray) -> np.ndarray:
     method_name = "SVM"
-    method = build_classifier()
-    method.fit(feat_train, labels_train)
-    coef_weights = method.coef_  # Weights assigned to the features when kernel="linear"
-    predicted = method.predict(feat_test)
+    clf = build_classifier()
+    clf.fit(feat_train, labels_train)
+    coef_weights = clf.coef_  # Weights assigned to the features
+    predicted = clf.predict(feat_test)
     evaluate(method_name, labels_test, predicted)  # TODO - MIGHT NOT NEED TO TEST?
     return coef_weights
 
@@ -536,19 +536,22 @@ def plot_coef_weights(coef_weights: np.ndarray, feature_names: Sequence[str],
 
 
 # https://www.kaggle.com/code/pierpaolo28/pima-indians-diabetes-database/notebook
-def print_sorted_coef_weights(coef: np.ndarray, coef_significance: np.ndarray, feature_names: Sequence[str],
-                              features_count: Sequence[int], output_path: str = "data/sorted_features.csv") -> None:
+def print_sorted_coef_weights(coef: np.ndarray, coef_significance: np.ndarray, coef_sign: np.ndarray,
+                              feature_names: Sequence[str], features_count: Sequence[int],
+                              output_path: str = "data/sorted_features.csv") -> None:
     sorted_coefficients_idx = np.argsort(coef)[::-1]  # in descending order
     sorted_coefficients = [np.round(weight, 2) for weight in coef[sorted_coefficients_idx]]
 
     feature_names = np.array(feature_names)
     sorted_feature_names = feature_names[sorted_coefficients_idx].tolist()
     sorted_feature_significance = coef_significance[sorted_coefficients_idx].tolist()
+    sorted_feature_sign = coef_sign[sorted_coefficients_idx].tolist()
     sorted_feature_counts = [features_count.count(feature.split("_")[1]) for feature in sorted_feature_names]
 
     df = pd.DataFrame(
-        zip(sorted_feature_names, sorted_feature_significance, sorted_feature_counts, sorted_coefficients),
-        columns=['Feature', 'Significance', 'Data Count', 'Weight (abs)'])
+        zip(sorted_feature_names, sorted_feature_significance, sorted_feature_counts, sorted_coefficients,
+            sorted_feature_sign),
+        columns=['Feature', 'Significance', 'Data Count', 'Weight (abs)', 'Weight sign'])
     df.to_csv(output_path, index=False)
 
 
@@ -676,10 +679,10 @@ def build_classifier() -> svm.LinearSVC:
     return svm.LinearSVC(class_weight='balanced', max_iter=1_000_000)
 
 
-def classify_shuffled(feat_train: np.ndarray, labels_train: np.ndarray, index: int) -> np.ndarray:
-    np.random.seed(index)
+def classify_shuffled(feat_train: np.ndarray, labels_train: np.ndarray, seed: int) -> np.ndarray:
+    rng = np.random.default_rng(seed)
 
-    feat_train = np.random.permutation(feat_train.T).T
+    feat_train = rng.permuted(feat_train, axis=0)
 
     clf = build_classifier()
     clf.fit(feat_train, labels_train)
@@ -688,7 +691,7 @@ def classify_shuffled(feat_train: np.ndarray, labels_train: np.ndarray, index: i
 
 
 def analyse_coef_weights(feat_train: np.ndarray, labels_train: np.ndarray,
-                         iterations: int = 10_000) -> Tuple[np.ndarray, np.ndarray]:
+                         iterations: int = 10_000) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     # categ_feat_train = feat_train[:, :-3]
     # categ_feature_names = np.array(feature_names[:-3])
     clf = build_classifier()
@@ -697,7 +700,9 @@ def analyse_coef_weights(feat_train: np.ndarray, labels_train: np.ndarray,
     clf.fit(feat_train, labels_train)
     print("Weights computed.")
 
-    coef_weights = abs(clf.coef_.ravel())  # flatten array and take absolute value
+    coef_weights = clf.coef_.ravel()
+    coef_sign = np.sign(coef_weights)
+    coef_weights = abs(coef_weights)
 
     with Pool() as pool:
         list_shuffled_coef_weights = list(tqdm(
@@ -717,7 +722,7 @@ def analyse_coef_weights(feat_train: np.ndarray, labels_train: np.ndarray,
     # coef_significance.append(100)  # concret_inplace
     # coef_significance.append(100)  # cosine_sim
     coef_significance = np.array(coef_significance)
-    return coef_weights, coef_significance
+    return coef_weights, coef_significance, coef_sign
 
 
 def main() -> None:
@@ -733,10 +738,10 @@ def main() -> None:
     features, feature_names, features_count, labels = process_features(clip_results,
                                                                        max_feature_count=1000 if args.debug else None)
     feat_train, labels_train, feat_test, labels_test = eval_split(features, labels)
-    coef_weights, coef_significance = analyse_coef_weights(feat_train, labels_train, args.iterations)
-    # coef_weights_svm = run_SVM(feat_train, labels_train, feat_test, labels_test)
+    coef_weights, coef_significance, coef_sign = analyse_coef_weights(feat_train, labels_train, args.iterations)
+    # coef_weights_svm = run_svm(feat_train, labels_train, feat_test, labels_test)
     # # # coef_weights = run_regression(features_scaled, df)
-    print_sorted_coef_weights(coef_weights, coef_significance, feature_names, features_count)
+    print_sorted_coef_weights(coef_weights, coef_significance, coef_sign, feature_names, features_count)
     # # # plot_coef_weights(coef_weights, feature_names)
     #
     # # majority_class(labels_test) # A: 82.93, P: 0.00, R: 0.00, F1: 0.00, ROC-AUC: 50.00
