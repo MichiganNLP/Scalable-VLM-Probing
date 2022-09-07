@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 #SBATCH --job-name=clip-svo-probes-feature-importance
-#SBATCH --mail-type=BEGIN,END
+#SBATCH --mail-type=FAIL,END
 #SBATCH --cpus-per-task=36
 #SBATCH --mem=180G
 #SBATCH --time=72:00:00
