@@ -2,7 +2,6 @@
 import argparse
 import ast
 import json
-import math
 import string
 from collections import Counter
 from functools import partial
@@ -16,7 +15,6 @@ import torch
 from nltk.corpus import wordnet
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from sklearn import preprocessing, svm
-from sklearn.feature_selection import SelectKBest, mutual_info_classif
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.model_selection import train_test_split
@@ -458,11 +456,6 @@ def pre_process_features(labels, one_hot_pos, one_hot_levin_w_change, one_hot_le
                                        one_hot_liwc_change, one_hot_liwc_inplace), axis=1)
     print(f"categorical feature size: {feat_categorical.shape}")
 
-    # categorical feature selection
-    # print('Before categ feat selection: feat_categorical_shape: %s feat_categorical_names_len: %d' % (feat_categorical.shape, len(feat_categorical_names)))
-    # feat_categorical, feat_categorical_names = filter_categorical_features(labels, feat_categorical, feat_categorical_names)
-    # print('After categ feat selection: feat_categorical_shape: %s feat_categorical_names_len: %d' % (feat_categorical.shape, len(feat_categorical_names)))
-
     feat_continuous = np.concatenate((concret_w_change, concret_w_inplace, cosine_sim), axis=1)
     scaler = preprocessing.StandardScaler()
     scaler.fit(feat_continuous)  # standardize continuous features
@@ -473,9 +466,6 @@ def pre_process_features(labels, one_hot_pos, one_hot_levin_w_change, one_hot_le
     features = np.concatenate((feat_categorical, feat_continuous_scaled), axis=1)
     feature_names = feat_categorical_names + feat_continuous_names
 
-    # sel = VarianceThreshold(threshold=(.95 * (1 - .95)))
-    # features_remove_low_var = sel.fit_transform(features_scaled)
-    # print(f"feature after remove low var size: {features_remove_low_var.shape}")
     print(f"all (categorical + continuous) features size: {features.shape}")
     return features, feature_names
 
@@ -505,19 +495,6 @@ def run_svm(feat_train: np.ndarray, labels_train: np.ndarray, feat_test: np.ndar
     evaluate(method_name, labels_test, predicted)  # TODO - MIGHT NOT NEED TO TEST?
     return coef_weights
 
-
-# def run_regression(features_scaled, df):
-#     method = Ridge() #normalize=False as we input features_scaled
-#
-#     # clip_scores = df['clip-score-diff'].to_numpy()
-#     clip_labels = df['label'].to_numpy()
-#     method.fit(features_scaled, clip_labels)
-#     score = method.score(features_scaled, clip_labels) #Return the coefficient of determination
-#     print(f"Ridge regression score: {score:.2f}")
-#     coef_weights = method.coef_
-#     # predicted = method.predict(feat_test)
-#     # evaluate(method_name, labels_test, predicted)
-#     return coef_weights
 
 def plot_coef_weights(coef_weights: np.ndarray, feature_names: Sequence[str],
                       path: str = "data/coef_importance.png") -> None:
@@ -603,25 +580,6 @@ def merge_csvs_and_filter_data(probes_path: str = "data/svo_probes.csv", neg_pat
     result.to_csv(output_path)
 
 
-def analyse_feat_correlations(df: pd.DataFrame) -> None:
-    # df_feat = df[["POS", "Levin-change", "Levin-inplace", "LIWC-change", "LIWC-inplace", "concret-change",
-    df_feat = df[["concret-change", "concret-inplace", "cosine-sim", "label"]]
-    corr = df_feat.corr()
-    print(corr)
-
-
-# feature selection
-def select_categorical_features(X_train: np.ndarray, y_train: np.ndarray,
-                                X_test: np.ndarray) -> Tuple[np.ndarray, np.ndarray, SelectKBest]:
-    # fs = SelectKBest(score_func=chi2, k='all') #chi2 = a test for independence between categorical variables.
-    fs = SelectKBest(score_func=mutual_info_classif,
-                     k='all')  # chi2 = a test for independence between categorical variables.
-    fs.fit(X_train, y_train)
-    X_train_fs = fs.transform(X_train)
-    X_test_fs = fs.transform(X_test)
-    return X_train_fs, X_test_fs, fs
-
-
 def delete_multiple_element(list_object: List[int], indices: Sequence[int]) -> None:
     indices = sorted(indices, reverse=True)
     for idx in indices:
@@ -629,36 +587,11 @@ def delete_multiple_element(list_object: List[int], indices: Sequence[int]) -> N
             list_object.pop(idx)
 
 
-def filter_categorical_features(labels: np.ndarray, feat_categorical: np.ndarray,
-                                feat_categorical_names: Sequence[str],
-                                threshold: float = 0.001) -> Tuple[np.ndarray, Sequence[str]]:
-    feat_train, labels_train, feat_test, labels_test = eval_split(feat_categorical, labels)
-    X_train_fs, X_test_fs, fs = select_categorical_features(feat_train, labels_train, feat_test)
-    feat_scores = [0 if math.isnan(x) else x for x in fs.scores_]
-    feat_names_scores = zip(feat_categorical_names, feat_scores)
-
-    # sorted_feat_names_scores = sorted(feat_names_scores, key=lambda x: x[1], reverse=True)
-    # # # what are scores for the features
-    # for (feat_name, feat_score) in sorted_feat_names_scores:
-    #     print('Feature %s: %f' % (feat_name, feat_score))
-
-    indices = []
-    for i, (feat_name, feat_score) in enumerate(feat_names_scores):
-        if feat_score < threshold:
-            indices.append(i)
-    # print("Removed features: " + str([feat_categorical_names[i] for i in indices]))
-    feat_categorical = np.delete(feat_categorical, indices, axis=1)
-    delete_multiple_element(feat_categorical_names, indices)
-
-    return feat_categorical, feat_categorical_names
-
-
 def process_features(clip_results,
                      max_feature_count: Optional[int] = None) -> Tuple[np.ndarray, Sequence[str], np.ndarray,
                                                                        np.ndarray]:
     df, features_count = get_features(clip_results, max_feature_count=max_feature_count)
     labels = df['label'].to_numpy()
-    # analyse_feat_correlations(df)
     # get_bert_data(clip_results)
 
     one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace, one_hot_liwc_change, one_hot_liwc_inplace, \
@@ -692,8 +625,6 @@ def classify_shuffled(feat_train: np.ndarray, labels_train: np.ndarray, seed: in
 
 def analyse_coef_weights(feat_train: np.ndarray, labels_train: np.ndarray,
                          iterations: int = 10_000) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    # categ_feat_train = feat_train[:, :-3]
-    # categ_feature_names = np.array(feature_names[:-3])
     clf = build_classifier()
 
     print("Computing the weights with the real features…")
@@ -715,12 +646,8 @@ def analyse_coef_weights(feat_train: np.ndarray, labels_train: np.ndarray,
         for list_coef in list_shuffled_coef_weights:
             if list_coef[i] <= coef:
                 significance += 1
-        # coef_significance.append([categ_feature_names[i], coef, significance])
-        # coef_significance.append(True if significance >= 0.95 * total_count else False)
         coef_significance.append(significance)
-    # coef_significance.append(100)  # concret_change
-    # coef_significance.append(100)  # concret_inplace
-    # coef_significance.append(100)  # cosine_sim
+
     coef_significance = np.array(coef_significance)
     return coef_weights, coef_significance, coef_sign
 
@@ -740,11 +667,9 @@ def main() -> None:
     feat_train, labels_train, feat_test, labels_test = eval_split(features, labels)
     coef_weights, coef_significance, coef_sign = analyse_coef_weights(feat_train, labels_train, args.iterations)
     # coef_weights_svm = run_svm(feat_train, labels_train, feat_test, labels_test)
-    # # # coef_weights = run_regression(features_scaled, df)
     print_sorted_coef_weights(coef_weights, coef_significance, coef_sign, feature_names, features_count)
-    # # # plot_coef_weights(coef_weights, feature_names)
-    #
-    # # majority_class(labels_test) # A: 82.93, P: 0.00, R: 0.00, F1: 0.00, ROC-AUC: 50.00
+    # plot_coef_weights(coef_weights, feature_names)
+    # majority_class(labels_test) # A: 82.93, P: 0.00, R: 0.00, F1: 0.00, ROC-AUC: 50.00
 
 
 if __name__ == "__main__":
