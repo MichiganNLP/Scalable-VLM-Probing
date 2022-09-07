@@ -1,29 +1,36 @@
+#!/usr/bin/env python
+import argparse
+import ast
+import json
+import math
 import string
 from collections import Counter
-import pandas as pd
-import ast
+from functools import partial
+from multiprocessing import Pool
 from typing import Sequence, Tuple
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import torch
 from nltk.corpus import wordnet
 from nltk.stem import WordNetLemmatizer, PorterStemmer
-import numpy as np
-from pygments.lexers import math
+from sklearn import preprocessing
+from sklearn import svm
+from sklearn.feature_selection import SelectKBest
+from sklearn.feature_selection import mutual_info_classif
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.model_selection import train_test_split
-from tqdm import tqdm
-from sklearn.preprocessing import OneHotEncoder
 from sklearn.preprocessing import MultiLabelBinarizer
-from sklearn import svm
-from sklearn import preprocessing
-from sklearn.feature_selection import VarianceThreshold
-import matplotlib.pyplot as plt
+from sklearn.preprocessing import OneHotEncoder
+from tqdm.auto import tqdm
+from transformers import AutoTokenizer, AutoModel
 from word_forms.word_forms import get_word_forms
-from sklearn.linear_model import Ridge
-from transformers import BertTokenizer, BertModel
-import torch
 
-tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-model = BertModel.from_pretrained("bert-base-uncased")
+model_name = "bert-base-uncased"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModel.from_pretrained(model_name)
 
 ps = PorterStemmer()
 lemmatizer = WordNetLemmatizer()
@@ -71,21 +78,21 @@ def pre_process_sentences(sentence):
     return sentence
 
 
-def read_SVO_CLIP_results_file():
+def read_data():
     # df = pd.read_csv("data/svo_probes.csv", index_col='index')
     df = pd.read_csv("data/merged.csv", index_col=0)
     df = df.sort_index()
     df['index'] = df.index
     results = []
     for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction, clip_score_diff in \
-                                                                                                zip(df['index'],
-                                                                                                  df['sentence'],
-                                                                                                  df['neg_sentence'],
-                                                                                                  df['pos_triplet'],
-                                                                                                  df['neg_triplet'],
-                                                                                                  df['neg_type'],
-                                                                                                  df['clip prediction'],
-                                                                                                  df['clip_score_diff']):
+            zip(df['index'],
+                df['sentence'],
+                df['neg_sentence'],
+                df['pos_triplet'],
+                df['neg_triplet'],
+                df['neg_type'],
+                df['clip prediction'],
+                df['clip_score_diff']):
 
         sentence = pre_process_sentences(sentence)  # remove punctuation
         neg_sentence = pre_process_sentences(neg_sentence)
@@ -99,7 +106,8 @@ def read_SVO_CLIP_results_file():
         match_neg_triplet = get_sentence_match_triplet(parsed_neg_triplet, neg_sentence)
 
         results.append(
-            [index, sentence, neg_sentence, match_pos_triplet, match_neg_triplet, neg_type[0], clip_prediction, clip_score_diff])
+            [index, sentence, neg_sentence, match_pos_triplet, match_neg_triplet, neg_type[0], clip_prediction,
+             clip_score_diff])
 
     return results
 
@@ -125,6 +133,20 @@ def parse_concreteness_file():
         word, _, conc_m, _, _, _, _, _, _ = line.split("	")
         dict_concreteness[word] = round(float(conc_m))
     return dict_concreteness
+
+
+# def get_levin_category(word, dict_levin_semantic, dict_levin_alternations):
+def get_levin_category(word, dict_levin_semantic):
+    list_categories = []
+    for key, category in dict_levin_semantic.items():
+        if word in category:
+            list_categories.append(key)
+    # for key, category in dict_levin_alternations.items():
+    #     if word in category:
+    #         list_categories.append(key)
+    # if not list_categories:
+    #     print(f"{word} not found in Levin file")
+    return list_categories
 
 
 def get_liwc_category(word, dict_liwc):
@@ -200,18 +222,37 @@ def compute_embedding(word_type, sentence):
     return embedding_word
 
 
-def save_BERT_embeddings(list_word_sentence):
+def save_BERT_embeddings(list_words):
+    word_embeddings = {}
+    for word in list_words:
+        inputs = tokenizer(word, return_tensors="pt")
+        with torch.no_grad():
+            outputs = model(**inputs)
+        embedding_word = outputs.last_hidden_state.detach().numpy()[0][1]
+        embedding_word = np.expand_dims(embedding_word, axis=0)
+        word_embeddings[word] = embedding_word
+
+    np.save("data/bert_embeddings.npy", word_embeddings)
+
+
+def save_BERT_embeddings_sentences(list_word_sentence):
     dict_data = {}
-    for [word, sentence] in tqdm(list_word_sentence):
+    for [word, sentence] in tqdm(list_word_sentence, desc="Computing BERT embeddings"):
         embedding_word = compute_embedding(word, sentence)
         dict_data[(word, sentence)] = embedding_word
+    np.save("data/bert_embeddings_sentences.npy", dict_data)
 
-    np.save("data/bert_embeddings.npy", dict_data)
 
-
-def get_cosine_similarity(word_changed, word_inplace, sentence, neg_sentence, bert_embeddings):
+def get_cosine_similarity_sent(word_changed, word_inplace, sentence, neg_sentence, bert_embeddings):
     embedding_word_changed = bert_embeddings[(word_changed, sentence)]
     embedding_word_inplace = bert_embeddings[(word_inplace, neg_sentence)]
+    cosine_sim = cosine_similarity(embedding_word_changed, embedding_word_inplace)[0][0]
+    return cosine_sim
+
+
+def get_cosine_similarity(word_changed, word_inplace, bert_embeddings):
+    embedding_word_changed = bert_embeddings[word_changed]
+    embedding_word_inplace = bert_embeddings[word_inplace]
     cosine_sim = cosine_similarity(embedding_word_changed, embedding_word_inplace)[0][0]
     return cosine_sim
 
@@ -220,7 +261,7 @@ def get_concreteness_score(word, dict_concreteness):
     if word in dict_concreteness:
         return dict_concreteness[word]
     else:
-        return 0  # TODO: nan?, mean of all scores??  - to not influence
+        return 3  # mean of all scores - to not influence results
 
 
 def parse_levin_file():
@@ -244,39 +285,36 @@ def parse_levin_file():
                 else:
                     content += line.replace('\r\n', "").rstrip()
                     content += " "
+        if '-*-' not in content:
+            levin_dict[key] = [x.lower() for x in content.split()]
+            for k in levin_dict[key]:
+                compressed_levin_dict[key_compressed].append(k)
     return levin_dict, compressed_levin_dict
 
 
-def map_levin_keys():
-    map_keys = {}
-    index = 1
-    levin_dict, compressed_levin_dict = parse_levin_file()
+def parse_levin_dict(levin_dict):
+    levin_semantic_broad, levin_semantic_all, levin_alternations = {}, {}, {}
+    with open('data/levin_semantic_broad.json', 'r') as f:
+        map_int_to_name = f.read()
+    map_int_to_name = json.loads(map_int_to_name)
 
-    # for key in levin_dict.keys():
-    for key in compressed_levin_dict.keys():
-        map_keys[key] = index
-        index += 1
-    return map_keys
-
-
-def get_levin_class_per_verb(verb):
-    levin_dict, compressed_levin_dict = parse_levin_file()
-    levin_classes = []
-    # for key, values in levin_dict.items():
-    for key, values in compressed_levin_dict.items():
-        if verb in values:
-            levin_classes.append(key)
-    return levin_classes
-
-
-def get_verb_properties(verb, map_keys):
-    levin_classes = get_levin_class_per_verb(verb)
-    index_classes = [map_keys[levin_class] for levin_class in levin_classes]
-    return index_classes
+    for key, value in levin_dict.items():
+        int_key = int(key.split(" ")[0].split(".")[0])
+        if int_key <= 8:
+            levin_alternations[key] = value
+        else:
+            levin_semantic_all[key] = value
+            name_key = map_int_to_name[str(int_key)]
+            if name_key not in levin_semantic_broad:
+                levin_semantic_broad[name_key] = []
+            for v in value:
+                if v not in levin_semantic_broad[name_key]:
+                    levin_semantic_broad[name_key].append(v)
+    return levin_semantic_broad, levin_semantic_all, levin_alternations
 
 
 def transform_features(df):
-    ohe = OneHotEncoder()
+    ohe = OneHotEncoder(handle_unknown="ignore")
     transformed = ohe.fit_transform(df[['POS']])
     one_hot_pos = transformed.toarray()
     pos_categ = ohe.categories_[0].tolist()
@@ -285,10 +323,7 @@ def transform_features(df):
     df_concat = pd.concat([df['Levin-change'], df['Levin-inplace']])
     one_hot_levin = mlb.fit_transform(df_concat)
     one_hot_levin_change, one_hot_levin_inplace = np.split(one_hot_levin, 2)
-    levin_classes_indexes = mlb.classes_.tolist()
-    map_keys = map_levin_keys()
-    levin_classes = [key for index in levin_classes_indexes for (key, value) in map_keys.items() if value == index]
-    # print(pd.DataFrame(one_hot_levin, columns=mlb.classes_, index=df.index).to_string())
+    levin_classes = mlb.classes_.tolist()
 
     mlb = MultiLabelBinarizer()
     df_concat = pd.concat([df['LIWC-change'], df['LIWC-inplace']])
@@ -306,15 +341,15 @@ def transform_features(df):
 
     # wup_sim = df['wup_sim'].to_numpy() #TODO: What to do with words with no synsets?
     # wup_sim = np.expand_dims(wup_sim, axis=1)
-
-    feature_names = ["POS_" + str(i) for i in pos_categ] + \
-                    ["Levin-change_" + str(i) for i in levin_classes] + ["Levin-inplace_" + str(i) for i in
-                                                                         levin_classes] + \
-                    ["LIWC-change_" + str(i) for i in liwc_classes] + ["LIWC-inplace_" + str(i) for i in liwc_classes] + \
-                    ["concret-change", "concret-inplace", "cosine-sim"]
+    feat_categorical_names = ["_POS-" + str(i) for i in pos_categ] + \
+                             ["Levin-change_" + str(i) for i in levin_classes] + \
+                             ["Levin-inplace_" + str(i) for i in levin_classes] + \
+                             ["LIWC-change_" + str(i) for i in liwc_classes] + \
+                             ["LIWC-inplace_" + str(i) for i in liwc_classes]
+    feat_continuous_names = ["_concret-change", "_concret-inplace", "_cosine-sim"]
 
     return one_hot_pos, one_hot_levin_change, one_hot_levin_inplace, one_hot_liwc_change, one_hot_liwc_inplace, \
-           concret_w_change, concret_w_inplace, cosine_sim, feature_names
+           concret_w_change, concret_w_inplace, cosine_sim, feat_categorical_names, feat_continuous_names
 
 
 def get_changed_word(pos_triplet, neg_triplet, neg_type):
@@ -329,8 +364,8 @@ def get_changed_word(pos_triplet, neg_triplet, neg_type):
 
 
 def get_bert_data(clip_results):
-    list_word_sentence = []
-    for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction in tqdm(clip_results):
+    list_word_sentence, set_words = [], set()
+    for _, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, _, _ in clip_results:
         word_changed, word_inplace = get_changed_word(pos_triplet, neg_triplet, neg_type)
         if not word_inplace or not word_changed:
             continue
@@ -338,26 +373,31 @@ def get_bert_data(clip_results):
             list_word_sentence.append([word_changed, sentence])
         if [word_inplace, neg_sentence] not in list_word_sentence:
             list_word_sentence.append([word_inplace, neg_sentence])
+        set_words.add(word_inplace)
+        set_words.add(word_changed)
     print(len(list_word_sentence))
-    save_BERT_embeddings(list_word_sentence)
+    save_BERT_embeddings_sentences(list_word_sentence)
+    # save_BERT_embeddings(set_words)
 
 
-def get_all_properties(clip_results):
-    # dict_properties = {"index": [], "sent": [], "n_sent": [], "word_changed": [], "word_inplace": [], "POS": [],
-    #                    "Levin_w_change": [], "Levin_w_inplace": [], "LIWC_w_change": [], "LIWC_w_inplace": [],
-    #                    "concreteness_w_change": [], "concreteness_w_inplace": [], "cosine_sim": [], "label": []}
+def get_features(clip_results, debug: bool = False):
+    dict_features = {"index": [], "sent": [], "n_sent": [], "word_changed": [], "word_inplace": [], "POS": [],
+                     "Levin-change": [], "Levin-inplace": [], "LIWC-change": [], "LIWC-inplace": [],
+                     "concret-change": [], "concret-inplace": [], "cosine-sim": [], "label": [],
+                     "clip-score-diff": []}
 
-    dict_properties = {"index": [], "sent": [], "n_sent": [], "word_changed": [], "word_inplace": [], "POS": [],
-                       "Levin-change": [], "Levin-inplace": [], "LIWC-change": [], "LIWC-inplace": [],
-                       "concret-change": [], "concret-inplace": [], "cosine-sim": [], "label": [], "clip-score-diff":[]}
-
-    map_keys = map_levin_keys()
+    levin_dict, compressed_levin_dict = parse_levin_file()
+    levin_semantic_broad, levin_semantic_all, levin_alternations = parse_levin_dict(levin_dict)
     dict_liwc, _ = parse_liwc_file()
     dict_concreteness = parse_concreteness_file()
+    # bert_embeddings_sentences = np.load("data/bert_embeddings_sentences.npy", allow_pickle=True).item()  # transform from ndarray to dict
     bert_embeddings = np.load("data/bert_embeddings.npy", allow_pickle=True).item()  # transform from ndarray to dict
 
-    # clip_results = clip_results[:1000]
-    for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction, clip_score_diff in tqdm(clip_results):
+    if debug:
+        clip_results = clip_results[:1000]
+
+    for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction, clip_score_diff in tqdm(
+            clip_results, desc="Computing the features"):
         word_changed, word_inplace = get_changed_word(pos_triplet, neg_triplet, neg_type)
 
         if not word_inplace or not word_changed:
@@ -365,12 +405,11 @@ def get_all_properties(clip_results):
             continue
 
         # wnet_sim = get_wup_similarity(word_changed, word_inplace, neg_type)
-        cosine_sim = get_cosine_similarity(word_changed, word_inplace, sentence, neg_sentence, bert_embeddings)
-        # cosine_sim = 0
-
-        if neg_type == 'v':
-            levin_classes_w_changed = get_verb_properties(word_changed, map_keys)
-            levin_classes_w_inplace = get_verb_properties(word_inplace, map_keys)
+        # cosine_sim = get_cosine_similarity_sent(word_changed, word_inplace, sentence, neg_sentence, bert_embeddings_sentences)
+        cosine_sim = get_cosine_similarity(word_changed, word_inplace, bert_embeddings)
+        if neg_type == 'v':  # TODO: How []/ No Levin or LIWC class influence results
+            levin_classes_w_changed = get_levin_category(word_changed, levin_semantic_broad)
+            levin_classes_w_inplace = get_levin_category(word_inplace, levin_semantic_broad)
         else:
             levin_classes_w_changed, levin_classes_w_inplace = [], []
 
@@ -380,59 +419,75 @@ def get_all_properties(clip_results):
         concret_w_change = get_concreteness_score(word_changed, dict_concreteness)
         concret_w_inplace = get_concreteness_score(word_inplace, dict_concreteness)
 
-        dict_properties["index"].append(index)
-        dict_properties["sent"].append(sentence)
-        dict_properties["n_sent"].append(neg_sentence)
-        dict_properties["word_changed"].append(word_changed)
-        dict_properties["word_inplace"].append(word_inplace)
-        dict_properties["POS"].append(neg_type)
-        # dict_properties["Levin"].append(levin_classes_w_changed)
-        dict_properties["Levin-change"].append(levin_classes_w_changed)
-        dict_properties["Levin-inplace"].append(levin_classes_w_inplace)
-        # dict_properties["LIWC"].append(liwc_category_w_changed)
-        dict_properties["LIWC-change"].append(liwc_category_w_changed)
-        dict_properties["LIWC-inplace"].append(liwc_category_w_inplace)
-        # dict_properties["concreteness"].append(concreteness_score_w_changed)
-        dict_properties["concret-change"].append(concret_w_change)
-        dict_properties["concret-inplace"].append(concret_w_inplace)
-        dict_properties["cosine-sim"].append(cosine_sim)
-        # dict_properties["wup_sim"].append(wnet_sim)
-        # dict_properties["WordNet"].append(wnet_category)
+        dict_features["index"].append(index)
+        dict_features["sent"].append(sentence)
+        dict_features["n_sent"].append(neg_sentence)
+        dict_features["word_changed"].append(word_changed)
+        dict_features["word_inplace"].append(word_inplace)
+        dict_features["POS"].append(neg_type)
+        # dict_features["Levin"].append(levin_classes_w_changed)
+        dict_features["Levin-change"].append(levin_classes_w_changed)
+        dict_features["Levin-inplace"].append(levin_classes_w_inplace)
+        # dict_features["LIWC"].append(liwc_category_w_changed)
+        dict_features["LIWC-change"].append(liwc_category_w_changed)
+        dict_features["LIWC-inplace"].append(liwc_category_w_inplace)
+        # dict_features["concreteness"].append(concreteness_score_w_changed)
+        dict_features["concret-change"].append(concret_w_change)
+        dict_features["concret-inplace"].append(concret_w_inplace)
+        dict_features["cosine-sim"].append(cosine_sim)
+        # dict_features["wup_sim"].append(wnet_sim)
+        # dict_features["WordNet"].append(wnet_category)
 
         # TODO: predict when CLIP result is pos or neg? - I think we want to learn when CLIP fails
-        dict_properties["label"].append(0 if clip_prediction == 'pos' else 1)
-        # dict_properties["label"].append(1 if clip_prediction == 'pos' else 0)
-        dict_properties["clip-score-diff"].append(clip_score_diff)
+        dict_features["label"].append(0 if clip_prediction == 'pos' else 1)
+        # dict_features["label"].append(1 if clip_prediction == 'pos' else 0)
+        dict_features["clip-score-diff"].append(clip_score_diff)
+
+    levin_liwc = [item for sublist in dict_features["Levin-change"] + dict_features["Levin-inplace"] + \
+                  dict_features["LIWC-change"] + dict_features["LIWC-inplace"] for item in sublist]
+    features_count = levin_liwc + ["POS-" + v for v in dict_features["POS"]] + \
+                     ["cosine-sim"] * len(dict_features["cosine-sim"]) + \
+                     ["concret-change"] * len(dict_features["concret-change"]) + \
+                     ["concret-inplace"] * len(dict_features["concret-inplace"])
+    df = pd.DataFrame.from_dict(dict_features)
+    # print(df[['word_changed', 'word_inplace', 'cosine-sim']].to_string())
+    return df, features_count
 
 
-    df = pd.DataFrame.from_dict(dict_properties)
-    # print(df.to_string())
-    return df
+def pre_process_features(labels, one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
+                         one_hot_liwc_change, one_hot_liwc_inplace, concret_w_change, concret_w_inplace, cosine_sim,
+                         feat_categorical_names, feat_continuous_names):
+    feat_categorical = np.concatenate((one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
+                                       one_hot_liwc_change, one_hot_liwc_inplace), axis=1)
+    print(f"categorical feature size: {feat_categorical.shape}")
+
+    # categorical feature selection
+    # print('Before categ feat selection: feat_categorical_shape: %s feat_categorical_names_len: %d' % (feat_categorical.shape, len(feat_categorical_names)))
+    # feat_categorical, feat_categorical_names = filter_categorical_features(labels, feat_categorical, feat_categorical_names)
+    # print('After categ feat selection: feat_categorical_shape: %s feat_categorical_names_len: %d' % (feat_categorical.shape, len(feat_categorical_names)))
+
+    feat_continuous = np.concatenate((concret_w_change, concret_w_inplace, cosine_sim), axis=1)
+    scaler = preprocessing.StandardScaler().fit(feat_continuous)  # standardize continuous features
+    feat_continuous_scaled = scaler.transform(feat_continuous)
+    print(f"continuous feature scaled size: {feat_continuous_scaled.shape}")
+
+    # concatenate categorical (one hot) with scaled continuous features
+    features = np.concatenate((feat_categorical, feat_continuous_scaled), axis=1)
+    feature_names = feat_categorical_names + feat_continuous_names
+
+    # sel = VarianceThreshold(threshold=(.95 * (1 - .95)))
+    # features_remove_low_var = sel.fit_transform(features_scaled)
+    # print(f"feature after remove low var size: {features_remove_low_var.shape}")
+    print(f"all (categorical + continuous) features size: {features.shape}")
+    return features, feature_names
 
 
-def pre_process_features(one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
-                         one_hot_liwc_change, one_hot_liwc_inplace,
-                         concret_w_change, concret_w_inplace, cosine_sim):
-    all_features = np.concatenate((one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
-                                   one_hot_liwc_change, one_hot_liwc_inplace, concret_w_change,
-                                   concret_w_inplace, cosine_sim), axis=1)
-    # standardize features
-    scaler = preprocessing.StandardScaler().fit(all_features)
-    features_scaled = scaler.transform(all_features)
-    print(f"feature scaled size: {features_scaled.shape}")
-
-    sel = VarianceThreshold(threshold=(.8 * (1 - .8)))
-    features_remove_low_var = sel.fit_transform(features_scaled)
-    print(f"feature after remove low var size: {features_remove_low_var.shape}")
-    return features_scaled
-
-
-def eval_split(all_features_scaled, df):
-    all_labels = df['label'].to_numpy()
-    features_train, features_test, labels_train, labels_test = train_test_split(all_features_scaled, all_labels,
+def eval_split(features, labels):
+    features_train, features_test, labels_train, labels_test = train_test_split(features, labels,
                                                                                 test_size=0.1,
                                                                                 random_state=5)
-    # print(all_features_scaled.shape, all_labels.shape, features_train.shape, features_test.shape)
+    print('feat_shape: %s\n labels_shape: %s\n train_feat_shape: %s\n test_feat_shape: %s' % (
+        features.shape, labels.shape, features_train.shape, features_test.shape))
     return features_train, labels_train, features_test, labels_test
 
 
@@ -450,21 +505,22 @@ def run_SVM(feat_train, labels_train, feat_test, labels_test):
     method.fit(feat_train, labels_train)
     coef_weights = method.coef_  # Weights assigned to the features when kernel="linear"
     predicted = method.predict(feat_test)
-    evaluate(method_name, labels_test, predicted) #TODO - MIGHT NOT NEED TO TEST?
+    evaluate(method_name, labels_test, predicted)  # TODO - MIGHT NOT NEED TO TEST?
     return coef_weights
 
-def run_regression(features_scaled, df):
-    method = Ridge() #normalize=False as we input features_scaled
 
-    # all_clip_scores = df['clip-score-diff'].to_numpy()
-    all_clip_labels = df['label'].to_numpy()
-    method.fit(features_scaled, all_clip_labels)
-    score = method.score(features_scaled, all_clip_labels) #Return the coefficient of determination
-    print(f"Ridge regression score: {score:.2f}")
-    coef_weights = method.coef_
-    # predicted = method.predict(feat_test)
-    # evaluate(method_name, labels_test, predicted)
-    return coef_weights
+# def run_regression(features_scaled, df):
+#     method = Ridge() #normalize=False as we input features_scaled
+#
+#     # clip_scores = df['clip-score-diff'].to_numpy()
+#     clip_labels = df['label'].to_numpy()
+#     method.fit(features_scaled, clip_labels)
+#     score = method.score(features_scaled, clip_labels) #Return the coefficient of determination
+#     print(f"Ridge regression score: {score:.2f}")
+#     coef_weights = method.coef_
+#     # predicted = method.predict(feat_test)
+#     # evaluate(method_name, labels_test, predicted)
+#     return coef_weights
 
 def plot_coef_weights(coef_weights, feature_names):
     top_features = 5
@@ -482,16 +538,18 @@ def plot_coef_weights(coef_weights, feature_names):
 
 
 # https://www.kaggle.com/code/pierpaolo28/pima-indians-diabetes-database/notebook
-def print_sorted_coef_weights(coef_weights, feature_names):
-    coef = abs(coef_weights.ravel())
-    # coef = coef_weights.ravel()  # flatten array
+def print_sorted_coef_weights(coef, coef_significance, feature_names, features_count):
     sorted_coefficients_idx = np.argsort(coef)[::-1]  # in descending order
     sorted_coefficients = [np.round(weight, 2) for weight in coef[sorted_coefficients_idx]]
 
     feature_names = np.array(feature_names)
-    sorted_feature_names = feature_names[sorted_coefficients_idx]
+    sorted_feature_names = feature_names[sorted_coefficients_idx].tolist()
+    sorted_feature_significance = coef_significance[sorted_coefficients_idx].tolist()
+    sorted_feature_counts = [features_count.count(feature.split("_")[1]) for feature in sorted_feature_names]
 
-    df = pd.DataFrame(zip(sorted_feature_names, sorted_coefficients), columns=['Feature', 'Weight (abs)'])
+    df = pd.DataFrame(
+        zip(sorted_feature_names, sorted_feature_significance, sorted_feature_counts, sorted_coefficients),
+        columns=['Feature', 'Significance', 'Data Count', 'Weight (abs)'])
     df.to_csv("data/sorted_features.csv", index=False)
 
 
@@ -514,7 +572,11 @@ def print_metrics(df, feature_names):
     print(f"Features size: {len(feature_names)}, {Counter(main_feature_names)}")
 
     levin_dict, compressed_levin_dict = parse_levin_file()
-    print(f"Levin total nb classes: {len(compressed_levin_dict.keys())}")
+    levin_semantic_broad, levin_semantic_all, levin_alternations = parse_levin_dict(levin_dict)
+    print(f"--Levin semantic_broad nb classes: {len(levin_semantic_broad.keys())}")
+    print(f"--Levin semantic_all nb classes: {len(levin_semantic_all.keys())}")
+    print(f"--Levin alternations nb classes: {len(levin_alternations.keys())}")
+
     liwc_dict, liwc_categ = parse_liwc_file()
     print(f"LIWC total nb classes: {len(liwc_categ)}")
 
@@ -538,28 +600,148 @@ def merge_csvs_and_filter_data():
     result.to_csv("data/merged.csv")
 
 
+def analyse_feat_correlations(df):
+    # df_feat = df[["POS", "Levin-change", "Levin-inplace", "LIWC-change", "LIWC-inplace", "concret-change",
+    df_feat = df[["concret-change", "concret-inplace", "cosine-sim", "label"]]
+    corr = df_feat.corr()
+    print(corr)
+
+
+# feature selection
+def select_categorical_features(X_train, y_train, X_test):
+    # fs = SelectKBest(score_func=chi2, k='all') #chi2 = a test for independence between categorical variables.
+    fs = SelectKBest(score_func=mutual_info_classif,
+                     k='all')  # chi2 = a test for independence between categorical variables.
+    fs.fit(X_train, y_train)
+    X_train_fs = fs.transform(X_train)
+    X_test_fs = fs.transform(X_test)
+    return X_train_fs, X_test_fs, fs
+
+
+def delete_multiple_element(list_object, indices):
+    indices = sorted(indices, reverse=True)
+    for idx in indices:
+        if idx < len(list_object):
+            list_object.pop(idx)
+
+
+def filter_categorical_features(labels, feat_categorical, feat_categorical_names):
+    # threshold = 1
+    threshold = 0.001
+    feat_train, labels_train, feat_test, labels_test = eval_split(feat_categorical, labels)
+    X_train_fs, X_test_fs, fs = select_categorical_features(feat_train, labels_train, feat_test)
+    feat_scores = [0 if math.isnan(x) else x for x in fs.scores_]
+    feat_names_scores = zip(feat_categorical_names, feat_scores)
+
+    # sorted_feat_names_scores = sorted(feat_names_scores, key=lambda x: x[1], reverse=True)
+    # # # what are scores for the features
+    # for (feat_name, feat_score) in sorted_feat_names_scores:
+    #     print('Feature %s: %f' % (feat_name, feat_score))
+
+    indices = []
+    for i, (feat_name, feat_score) in enumerate(feat_names_scores):
+        if feat_score < threshold:
+            indices.append(i)
+    # print("Removed features: " + str([feat_categorical_names[i] for i in indices]))
+    feat_categorical = np.delete(feat_categorical, indices, axis=1)
+    delete_multiple_element(feat_categorical_names, indices)
+
+    return feat_categorical, feat_categorical_names
+
+
+def process_features(clip_results, debug: bool = False):
+    df, features_count = get_features(clip_results, debug=debug)
+    labels = df['label'].to_numpy()
+    # analyse_feat_correlations(df)
+    # get_bert_data(clip_results)
+
+    one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace, one_hot_liwc_change, one_hot_liwc_inplace, \
+    concret_w_change, concret_w_inplace, cosine_sim, feat_categorical_names, feat_continuous_names = \
+        transform_features(df)
+
+    # categorical feature selection, standardize (scale) continuous features and concatenate categorical & continuous
+    features, feature_names = pre_process_features(labels, one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
+                                                   one_hot_liwc_change, one_hot_liwc_inplace, concret_w_change,
+                                                   concret_w_inplace,
+                                                   cosine_sim, feat_categorical_names, feat_continuous_names)
+
+    print_metrics(df, feature_names)
+    return features, feature_names, features_count, labels
+
+
+def shuffle_parallelize(feat_train: np.ndarray, index: int) -> np.ndarray:
+    for feature in feat_train.T:
+        np.random.seed(index)
+        np.random.shuffle(feature)
+    method = svm.SVC(class_weight='balanced', kernel='linear')
+    method.fit(feat_train, labels_train)
+    shuffled_coef_weights = method.coef_
+    shuffled_coef_weights = abs(shuffled_coef_weights.ravel())
+    return shuffled_coef_weights
+
+
+def analyse_coef_weights(feat_train: np.ndarray, labels_train, feature_names):
+    # categ_feat_train = feat_train[:, :-3]
+    # categ_feature_names = np.array(feature_names[:-3])
+    method = svm.SVC(class_weight='balanced', kernel='linear')
+
+    print("Computing the weights with the real features…")
+    method.fit(feat_train, labels_train)
+    print("Weights computed.")
+
+    coef_weights = method.coef_
+    coef_weights = abs(coef_weights.ravel())  # flatten array and take absolute value
+
+    total_count = 10_000
+
+    # list_shuffled_coef_weights = []
+    # for _ in tqdm(range(total_count)):
+    #     for feature in feat_train.T:
+    #         np.random.shuffle(feature)  # this modifies categ_feat_train
+    #     method = svm.SVC(class_weight='balanced', kernel='linear')
+    #     method.fit(feat_train, labels_train)
+    #     shuffled_coef_weights = method.coef_
+    #     shuffled_coef_weights = abs(shuffled_coef_weights.ravel())
+    #     list_shuffled_coef_weights.append(shuffled_coef_weights)
+
+    with Pool() as pool:
+        list_shuffled_coef_weights = list(tqdm(
+            pool.imap_unordered(partial(shuffle_parallelize, feat_train), range(total_count)), total=total_count,
+            desc="Computing the weights with shuffled columns"))
+
+    coef_significance = []
+    for i, coef in enumerate(coef_weights):
+        significance = 0
+        for list_coef in list_shuffled_coef_weights:
+            if list_coef[i] <= coef:
+                significance += 1
+        # coef_significance.append([categ_feature_names[i], coef, significance])
+        # coef_significance.append(True if significance >= 0.95 * total_count else False)
+        coef_significance.append(significance)
+    # coef_significance.append(100)  # concret_change
+    # coef_significance.append(100)  # concret_inplace
+    # coef_significance.append(100)  # cosine_sim
+    coef_significance = np.array(coef_significance)
+    return coef_weights, coef_significance
+
+
 if __name__ == "__main__":
     # get_wnet_category(word='', pos='')
     # merge_csvs_and_filter_data()
 
-    clip_results = read_SVO_CLIP_results_file()
-    # get_bert_data(clip_results)
-    df = get_all_properties(clip_results)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--debug", action="store_true")
+    args = parser.parse_args()
 
-    one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace, one_hot_liwc_change, one_hot_liwc_inplace, \
-    concret_w_change, concret_w_inplace, cosine_sim, feature_names = transform_features(df)
+    clip_results = read_data()
+    features, feature_names, features_count, labels = process_features(clip_results, debug=args.debug)
+    feat_train, labels_train, feat_test, labels_test = eval_split(features, labels)
 
-    print_metrics(df, feature_names)
+    coef_weights, coef_significance = analyse_coef_weights(feat_train, labels_train, feature_names)
 
-    features_scaled = pre_process_features(one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
-                                           one_hot_liwc_change, one_hot_liwc_inplace,
-                                           concret_w_change, concret_w_inplace, cosine_sim)
-
-    feat_train, labels_train, feat_test, labels_test = eval_split(features_scaled, df)
-
-    coef_weights = run_SVM(feat_train, labels_train, feat_test, labels_test)
-    # coef_weights = run_regression(features_scaled, df)
-    print_sorted_coef_weights(coef_weights, feature_names)
+    # coef_weights_svm = run_SVM(feat_train, labels_train, feat_test, labels_test)
+    # # # coef_weights = run_regression(features_scaled, df)
+    print_sorted_coef_weights(coef_weights, coef_significance, feature_names, features_count)
     # # # plot_coef_weights(coef_weights, feature_names)
-    # #
-    # majority_class(labels_test)
+    #
+    # # majority_class(labels_test) # A: 82.93, P: 0.00, R: 0.00, F1: 0.00, ROC-AUC: 50.00

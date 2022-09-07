@@ -1,0 +1,9 @@
+matplotlib==3.5.3
+nltk==3.7
+numpy==1.23.2
+pandas==1.4.4
+scikit-learn==1.1.2
+torch==1.12.1
+tqdm==4.64.1
+transformers==4.21.3
+word_forms==2.1.0
