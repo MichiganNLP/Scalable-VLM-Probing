@@ -627,9 +627,9 @@ def analyse_coef_weights(feat_train: np.ndarray, labels_train: np.ndarray,
                          iterations: int = 10_000) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     clf = build_classifier()
 
-    print("Computing the weights with the real features…")
+    print("Computing the coefficients with the real features…")
     clf.fit(feat_train, labels_train)
-    print("Weights computed.")
+    print("Coefficients computed.")
 
     coef_weights = clf.coef_.ravel()
     coef_sign = np.sign(coef_weights)
@@ -638,7 +638,7 @@ def analyse_coef_weights(feat_train: np.ndarray, labels_train: np.ndarray,
     with Pool() as pool:
         list_shuffled_coef_weights = list(tqdm(
             pool.imap_unordered(partial(classify_shuffled, feat_train, labels_train), range(iterations)),
-            total=iterations, desc="Computing the weights with shuffled columns"))
+            total=iterations, desc="Computing the coefficients with shuffled columns"))
 
     coef_significance = []
     for i, coef in enumerate(coef_weights):
