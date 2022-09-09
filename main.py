@@ -449,8 +449,8 @@ def get_features(clip_results, path: str = "data/bert_embeddings.npy",
     return df, features_count
 
 
-def pre_process_features(labels, one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
-                         one_hot_liwc_change, one_hot_liwc_inplace, concret_w_change, concret_w_inplace, cosine_sim,
+def pre_process_features(one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace, one_hot_liwc_change,
+                         one_hot_liwc_inplace, concret_w_change, concret_w_inplace, cosine_sim,
                          feat_categorical_names, feat_continuous_names) -> Tuple[np.ndarray, Sequence[str]]:
     feat_categorical = np.concatenate((one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
                                        one_hot_liwc_change, one_hot_liwc_inplace), axis=1)
@@ -468,32 +468,6 @@ def pre_process_features(labels, one_hot_pos, one_hot_levin_w_change, one_hot_le
 
     print(f"all (categorical + continuous) features size: {features.shape}")
     return features, feature_names
-
-
-def eval_split(features: np.ndarray, labels: np.ndim) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    features_train, features_test, labels_train, labels_test = train_test_split(features, labels,
-                                                                                test_size=0.1,
-                                                                                random_state=5)
-    print('feat_shape: %s\n labels_shape: %s\n train_feat_shape: %s\n test_feat_shape: %s' % (
-        features.shape, labels.shape, features_train.shape, features_test.shape))
-    return features_train, labels_train, features_test, labels_test
-
-
-def majority_class(labels_test: np.ndarray) -> None:
-    method_name = 'Majority class'
-    predicted = [Counter(labels_test).most_common()[0][0]] * len(labels_test)
-    evaluate(method_name, labels_test, predicted)
-
-
-def run_svm(feat_train: np.ndarray, labels_train: np.ndarray, feat_test: np.ndarray,
-            labels_test: np.ndarray) -> np.ndarray:
-    method_name = "SVM"
-    clf = build_classifier()
-    clf.fit(feat_train, labels_train)
-    coef_weights = clf.coef_  # Weights assigned to the features
-    predicted = clf.predict(feat_test)
-    evaluate(method_name, labels_test, predicted)  # TODO - MIGHT NOT NEED TO TEST?
-    return coef_weights
 
 
 def plot_coef_weights(coef_weights: np.ndarray, feature_names: Sequence[str],
@@ -544,11 +518,12 @@ def evaluate(method_name: str, labels_test: np.ndarray, predicted: Sequence[int]
     print(f"Counter GT: {Counter(labels_test)}")
 
 
-def print_metrics(df: pd.DataFrame, feature_names: Sequence[str]) -> None:
+def print_metrics(df: pd.DataFrame, feature_names: Sequence[str], features: np.ndarray) -> None:
     main_feature_names = [feature_name.split("_")[0] for feature_name in feature_names]
     print(f"Counter all labels: {Counter(df['label'].tolist())}")
     print(f"Data size: {len(df['index'].tolist())}")
     print(f"Features size: {len(feature_names)}, {Counter(main_feature_names)}")
+    print(f"Features shape: {features.shape}")
 
     levin_dict, compressed_levin_dict = parse_levin_file()
     levin_semantic_broad, levin_semantic_all, levin_alternations = parse_levin_dict(levin_dict)
@@ -599,12 +574,12 @@ def process_features(clip_results,
         transform_features(df)
 
     # categorical feature selection, standardize (scale) continuous features and concatenate categorical & continuous
-    features, feature_names = pre_process_features(labels, one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
+    features, feature_names = pre_process_features(one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
                                                    one_hot_liwc_change, one_hot_liwc_inplace, concret_w_change,
                                                    concret_w_inplace,
                                                    cosine_sim, feat_categorical_names, feat_continuous_names)
 
-    print_metrics(df, feature_names)
+    print_metrics(df, feature_names, features)
     return features, feature_names, features_count, labels
 
 
@@ -612,24 +587,25 @@ def build_classifier() -> svm.LinearSVC:
     return svm.LinearSVC(class_weight='balanced', max_iter=1_000_000)
 
 
-def classify_shuffled(feat_train: np.ndarray, labels_train: np.ndarray, seed: int) -> np.ndarray:
+def classify_shuffled(features: np.ndarray, labels: np.ndarray, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
 
-    feat_train = rng.permuted(feat_train, axis=0)
+    features = rng.permuted(features, axis=0)
 
     clf = build_classifier()
-    clf.fit(feat_train, labels_train)
+    clf.fit(features, labels)
 
     return abs(clf.coef_.ravel())
 
 
-def analyse_coef_weights(feat_train: np.ndarray, labels_train: np.ndarray,
+def analyse_coef_weights(features: np.ndarray, labels: np.ndarray,
                          iterations: int = 10_000) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     clf = build_classifier()
 
     print("Computing the coefficients with the real features…")
-    clf.fit(feat_train, labels_train)
+    clf.fit(features, labels)
     print("Coefficients computed.")
+
 
     coef_weights = clf.coef_.ravel()
     coef_sign = np.sign(coef_weights)
@@ -637,7 +613,7 @@ def analyse_coef_weights(feat_train: np.ndarray, labels_train: np.ndarray,
 
     with Pool() as pool:
         list_shuffled_coef_weights = list(tqdm(
-            pool.imap_unordered(partial(classify_shuffled, feat_train, labels_train), range(iterations)),
+            pool.imap_unordered(partial(classify_shuffled, features, labels), range(iterations)),
             total=iterations, desc="Computing the coefficients with shuffled columns"))
 
     coef_significance = []
@@ -664,12 +640,9 @@ def main() -> None:
     clip_results = read_data()
     features, feature_names, features_count, labels = process_features(clip_results,
                                                                        max_feature_count=1000 if args.debug else None)
-    feat_train, labels_train, feat_test, labels_test = eval_split(features, labels)
-    coef_weights, coef_significance, coef_sign = analyse_coef_weights(feat_train, labels_train, args.iterations)
-    # coef_weights_svm = run_svm(feat_train, labels_train, feat_test, labels_test)
+    coef_weights, coef_significance, coef_sign = analyse_coef_weights(features, labels, args.iterations)
     print_sorted_coef_weights(coef_weights, coef_significance, coef_sign, feature_names, features_count)
     # plot_coef_weights(coef_weights, feature_names)
-    # majority_class(labels_test) # A: 82.93, P: 0.00, R: 0.00, F1: 0.00, ROC-AUC: 50.00
 
 
 if __name__ == "__main__":
