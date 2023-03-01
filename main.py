@@ -17,7 +17,6 @@ from nltk.stem import PorterStemmer, WordNetLemmatizer
 from sklearn import preprocessing, svm
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder
 from tqdm.auto import tqdm
 from transformers import AutoModel, AutoTokenizer
@@ -27,7 +26,7 @@ model_name = "bert-base-uncased"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModel.from_pretrained(model_name)
 
-ps = PorterStemmer()
+stemmer = PorterStemmer()
 lemmatizer = WordNetLemmatizer()
 
 
@@ -54,7 +53,7 @@ def get_sentence_match_triplet(triplets: Sequence[Tuple[str, str, str]], sentenc
     else:
         words_sentence = sentence.split()
         lemmatized_words_sentence = [lemmatizer.lemmatize(word) for word in sentence.split()]
-        stemmed_words_sentence = [ps.stem(word) for word in sentence.split()]
+        stemmed_words_sentence = [stemmer.stem(word) for word in sentence.split()]
         all_words = set(words_sentence + lemmatized_words_sentence + stemmed_words_sentence)
         for triplet in triplets:
             if triplet[0] in all_words and triplet[1] in all_words and triplet[2] in all_words:
@@ -189,7 +188,7 @@ def compute_embedding(word_type: str, sentence: str) -> np.ndarray:
     if sentence:
         inputs = tokenizer(sentence, return_tensors="pt")
         map_word_token_idx = {x: tokenizer.encode(x, add_special_tokens=False) for x in sentence.split()}
-        stemmed_map_word_token_idx = {ps.stem(word): map_word_token_idx[word] for word in map_word_token_idx.keys()}
+        stemmed_map_word_token_idx = {stemmer.stem(word): map_word_token_idx[word] for word in map_word_token_idx.keys()}
         token_ids = []
         if word_type in stemmed_map_word_token_idx:
             token_ids = stemmed_map_word_token_idx[word_type]
@@ -563,14 +562,14 @@ def delete_multiple_element(list_object: List[int], indices: Sequence[int]) -> N
 
 
 def process_features(clip_results,
-                     max_feature_count: Optional[int] = None) -> Tuple[np.ndarray, Sequence[str], np.ndarray,
+                     max_feature_count: Optional[int] = None) -> Tuple[np.ndarray, Sequence[str], Sequence[int],
                                                                        np.ndarray]:
     df, features_count = get_features(clip_results, max_feature_count=max_feature_count)
     labels = df['label'].to_numpy()
     # get_bert_data(clip_results)
 
     one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace, one_hot_liwc_change, one_hot_liwc_inplace, \
-    concret_w_change, concret_w_inplace, cosine_sim, feat_categorical_names, feat_continuous_names = \
+        concret_w_change, concret_w_inplace, cosine_sim, feat_categorical_names, feat_continuous_names = \
         transform_features(df)
 
     # categorical feature selection, standardize (scale) continuous features and concatenate categorical & continuous
@@ -606,7 +605,6 @@ def analyse_coef_weights(features: np.ndarray, labels: np.ndarray,
     clf.fit(features, labels)
     print("Coefficients computed.")
 
-
     coef_weights = clf.coef_.ravel()
     coef_sign = np.sign(coef_weights)
     coef_weights = abs(coef_weights)
@@ -628,11 +626,15 @@ def analyse_coef_weights(features: np.ndarray, labels: np.ndarray,
     return coef_weights, coef_significance, coef_sign
 
 
-def main() -> None:
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--iterations", type=int, default=10_000)
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
 
     # get_wnet_category(word='', pos='')
     # merge_csvs_and_filter_data()
