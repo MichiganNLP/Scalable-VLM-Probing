@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 import argparse
 import ast
+import itertools
 import json
 import string
-from collections import Counter
+from collections import Counter, defaultdict
 from functools import partial
 from multiprocessing import Pool
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Container, List, Mapping, Optional, Sequence, Set, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,6 +23,9 @@ from tqdm.auto import tqdm
 from transformers import AutoModel, AutoTokenizer
 from word_forms.word_forms import get_word_forms
 
+Triplet = Tuple[str, str, str]
+Instance = Tuple[int, str, str, Triplet, Triplet, str, bool, float]
+
 model_name = "bert-base-uncased"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModel.from_pretrained(model_name)
@@ -30,23 +34,21 @@ stemmer = PorterStemmer()
 lemmatizer = WordNetLemmatizer()
 
 
-def parse_triplets(triplets: str) -> Sequence[Tuple[str, str, str]]:
+def parse_triplets(triplets: str) -> Sequence[Triplet]:
     if triplets.startswith("["):
         return [triplet.split(",") for triplet in ast.literal_eval(triplets)]
     else:
         return [triplets.split(",")]  # noqa
 
 
-def get_first_triplet(triplets: Sequence[Tuple[str, str, str]]):
+def get_first_triplet(triplets: Sequence[Triplet]) -> Triplet:
     return next(iter(triplets), ("", "", ""))
 
 
-def get_sentence_match_triplet(triplets: Sequence[Tuple[str, str, str]], sentence: str):
+def get_sentence_match_triplet(triplets: Sequence[Triplet], sentence: str) -> Triplet:
     if "people" in sentence.split():
-        # print(sentence, triplets)
-        triplets = [list(map(lambda x: x.replace('person', 'people'), t)) for t in triplets]
-        # print(sentence, triplets)
-        # print("----------------")
+        triplets = [(s.replace('person', 'people'), v.replace('person', 'people'), o.replace('person', 'people'))
+                    for s, v, o in triplets]
 
     if len(triplets) == 1:
         return triplets[0]
@@ -59,8 +61,7 @@ def get_sentence_match_triplet(triplets: Sequence[Tuple[str, str, str]], sentenc
             if triplet[0] in all_words and triplet[1] in all_words and triplet[2] in all_words:
                 return triplet
 
-    # print(f"ERROR: triplets: {triplets}; sentence: {sentence}; all words: {all_words}")
-    return triplets[0][0]
+    return triplets[0]
 
 
 def pre_process_sentences(sentence: str) -> str:
@@ -72,22 +73,14 @@ def pre_process_sentences(sentence: str) -> str:
     return sentence
 
 
-def read_data(path: str = "data/merged.csv") -> Sequence[Tuple[int, str, str, Tuple[str, str, str],
-                                                               Tuple[str, str, str, bool, float], str]]:
-    # df = pd.read_csv("data/svo_probes.csv", index_col='index')
+def read_data(path: str = "data/merged.csv") -> Sequence[Instance]:
     df = pd.read_csv(path, index_col=0)
     df = df.sort_index()
     df['index'] = df.index
     results = []
     for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction, clip_score_diff in \
-            zip(df['index'],
-                df['sentence'],
-                df['neg_sentence'],
-                df['pos_triplet'],
-                df['neg_triplet'],
-                df['neg_type'],
-                df['clip prediction'],
-                df['clip_score_diff']):
+            zip(df['index'], df['sentence'], df['neg_sentence'], df['pos_triplet'], df['neg_triplet'], df['neg_type'],
+                df['clip prediction'], df['clip_score_diff']):
 
         sentence = pre_process_sentences(sentence)  # remove punctuation
         neg_sentence = pre_process_sentences(neg_sentence)
@@ -107,44 +100,34 @@ def read_data(path: str = "data/merged.csv") -> Sequence[Tuple[int, str, str, Tu
     return results
 
 
-def parse_liwc_file(path: str = 'data/LIWC.2015.all.txt') -> Tuple[Dict[str, Sequence[str]], Set[str]]:
-    dict_liwc = {}
-    liwc_categ = set()
+def parse_liwc_file(path: str = 'data/LIWC.2015.all.txt') -> Tuple[Mapping[str, Sequence[str]], Set[str]]:
+    dict_liwc = defaultdict(list)
+    liwc_categories = set()
     with open(path) as file:
         for line in file:
             word, category = [w.strip() for w in line.strip().split(",")]
-            if word not in dict_liwc:
-                dict_liwc[word] = []
             dict_liwc[word].append(category)
-            liwc_categ.add(category)
-    return dict_liwc, liwc_categ
+            liwc_categories.add(category)
+    return dict_liwc, liwc_categories
 
 
-def parse_concreteness_file(path: str = 'data/concretness.txt') -> Dict[str, float]:
+def parse_concreteness_file(path: str = 'data/concreteness.txt') -> Mapping[str, float]:
     dict_concreteness = {}
     with open(path) as file:
-        lines = file.readlines()
-    for line in lines[1:]:
-        word, _, conc_m, _, _, _, _, _, _ = line.split("	")
-        dict_concreteness[word] = round(float(conc_m))
+        next(file)  # Skip the first line.
+        for line in file:
+            word, _, concreteness_m, _, _, _, _, _, _ = line.split("	")
+            dict_concreteness[word] = round(float(concreteness_m))
     return dict_concreteness
 
 
-# def get_levin_category(word, dict_levin_semantic, dict_levin_alternations):
-def get_levin_category(word: str, dict_levin_semantic: Dict[str, Sequence[str]]) -> Sequence[str]:
-    list_categories = []
-    for key, category in dict_levin_semantic.items():
-        if word in category:
-            list_categories.append(key)
-    # for key, category in dict_levin_alternations.items():
-    #     if word in category:
-    #         list_categories.append(key)
-    # if not list_categories:
-    #     print(f"{word} not found in Levin file")
-    return list_categories
+def get_levin_category(word: str, dict_levin_semantic: Mapping[str, Container[str]]) -> Sequence[str]:
+    return [key
+            for key, category in dict_levin_semantic.items()
+            if word in category]
 
 
-def get_liwc_category(word: str, dict_liwc: Dict[str, Sequence[str]]) -> Sequence[str]:
+def get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Sequence[str]:
     list_categories = []
     for key, category in dict_liwc.items():
         if key == word:
@@ -152,43 +135,32 @@ def get_liwc_category(word: str, dict_liwc: Dict[str, Sequence[str]]) -> Sequenc
         elif key[-1] == "*" and key[:-1] in word:
             list_categories.append(category)
 
-    list_categories = [x for xs in list_categories for x in xs]
-    # if not list_categories:
-    #     print(f"{word} not found in LIWC file")
-    return list_categories
+    return [x for xs in list_categories for x in xs]
 
-
-# def get_wnet_category(word, pos):
-#     for word, pos in zip(["stand", "fry", "cook"], ["v", "v", "v"]):
-#         if pos == 's' or pos == 'o':
-#             pos = 'n'  # TODO: might have other than nouns
-#         synset = wordnet.synset(".".join([word, pos, '01']))
-#         hypernyms = synset.hypernyms()  # gives other synsets
-#         lexname = hypernyms[0].lexname()
-#         name = hypernyms[0].name()
-#     # return hypernyms
 
 def get_wup_similarity(word_changed: str, word_inplace: str, pos: str) -> float:
     if pos == 's' or pos == 'o':
-        pos = 'n'  # TODO: might have other than nouns
+        pos = 'n'  # TODO: it might have other types of words different from nouns.
+
     try:
         syn1 = wordnet.synset(".".join([word_changed, pos, '01']))
-    except:
+    except wordnet.WordNetError:
         syn1 = wordnet.synsets(word_changed)[0]
+
     try:
         syn2 = wordnet.synset(".".join([word_inplace, pos, '01']))
-    except:
+    except wordnet.WordNetError:
         syn2 = wordnet.synsets(word_inplace)[0]
 
-    wup_similarity_value = syn1.wup_similarity(syn2)
-    return wup_similarity_value
+    return syn1.wup_similarity(syn2)
 
 
 def compute_embedding(word_type: str, sentence: str) -> np.ndarray:
     if sentence:
         inputs = tokenizer(sentence, return_tensors="pt")
         map_word_token_idx = {x: tokenizer.encode(x, add_special_tokens=False) for x in sentence.split()}
-        stemmed_map_word_token_idx = {stemmer.stem(word): map_word_token_idx[word] for word in map_word_token_idx.keys()}
+        stemmed_map_word_token_idx = {stemmer.stem(word): map_word_token_idx[word]
+                                      for word in map_word_token_idx.keys()}
         token_ids = []
         if word_type in stemmed_map_word_token_idx:
             token_ids = stemmed_map_word_token_idx[word_type]
@@ -209,19 +181,18 @@ def compute_embedding(word_type: str, sentence: str) -> np.ndarray:
         inputs = tokenizer(word_type, return_tensors="pt")
         index_word = [1]
 
-    with torch.no_grad():
+    with torch.inference_mode():
         outputs = model(**inputs)
 
     embedding_word = np.mean(outputs.last_hidden_state.detach().numpy()[0][index_word[0]:index_word[-1] + 1], axis=0)
-    embedding_word = np.expand_dims(embedding_word, axis=0)
-    return embedding_word
+    return np.expand_dims(embedding_word, axis=0)
 
 
 def save_bert_embeddings(list_words: Sequence[str], path: str = "data/bert_embeddings.npy") -> None:
     word_embeddings = {}
     for word in list_words:
         inputs = tokenizer(word, return_tensors="pt")
-        with torch.no_grad():
+        with torch.inference_mode():
             outputs = model(**inputs)
         embedding_word = outputs.last_hidden_state.detach().numpy()[0][1]
         embedding_word = np.expand_dims(embedding_word, axis=0)
@@ -234,40 +205,38 @@ def save_bert_embeddings_sentences(list_word_sentence: Sequence[Tuple[str, str]]
                                    path: str = "data/bert_embeddings_sentences.npy") -> None:
     dict_data = {}
     for word, sentence in tqdm(list_word_sentence, desc="Computing BERT embeddings"):
-        embedding_word = compute_embedding(word, sentence)
-        dict_data[(word, sentence)] = embedding_word
+        dict_data[(word, sentence)] = compute_embedding(word, sentence)
     np.save(path, dict_data)
 
 
 def get_cosine_similarity_sent(word_changed: str, word_inplace: str, sentence: str, neg_sentence: str,
-                               bert_embeddings: Dict[Tuple[str, str], np.ndarray]) -> float:
+                               bert_embeddings: Mapping[Tuple[str, str], np.ndarray]) -> float:
     embedding_word_changed = bert_embeddings[(word_changed, sentence)]
     embedding_word_inplace = bert_embeddings[(word_inplace, neg_sentence)]
     return cosine_similarity(embedding_word_changed, embedding_word_inplace)[0][0]
 
 
-def get_cosine_similarity(word_changed: str, word_inplace: str, bert_embeddings: Dict[str, np.ndarray]) -> float:
+def get_cosine_similarity(word_changed: str, word_inplace: str, bert_embeddings: Mapping[str, np.ndarray]) -> float:
     embedding_word_changed = bert_embeddings[word_changed]
     embedding_word_inplace = bert_embeddings[word_inplace]
     return cosine_similarity(embedding_word_changed, embedding_word_inplace)[0][0]
 
 
-def get_concreteness_score(word: str, dict_concreteness: Dict[str, float]) -> float:
-    # 3 is the mean of all the scores, to not influence the results.
-    return dict_concreteness.get(word, 3)
+def get_concreteness_score(word: str, dict_concreteness: Mapping[str, float]) -> float:
+    return dict_concreteness.get(word, 3)  # 3 is the mean of all the scores, to not influence the results.
 
 
-def parse_levin_file(path: str = 'data/levin_verbs.txt') -> Tuple[Dict[str, Sequence[str]], Dict[str, Sequence[str]]]:
+def parse_levin_file(path: str = 'data/levin_verbs.txt') -> Tuple[Mapping[str, Sequence[str]],
+                                                                  Mapping[str, Sequence[str]]]:
     content = ""
-    levin_dict, compressed_levin_dict = {}, {}
+    levin_dict = {}
+    compressed_levin_dict = defaultdict(list)
     with open(path) as file:
         for line in file:
             line = line.lstrip()
             if line and line[0].isnumeric():
                 key = " ".join(line.split())
                 key_compressed = key.split(" ")[0].split(".")[0]
-                if key_compressed not in compressed_levin_dict:
-                    compressed_levin_dict[key_compressed] = []
             else:
                 if line:
                     content += line.replace('\r\n', "").rstrip()
@@ -275,79 +244,73 @@ def parse_levin_file(path: str = 'data/levin_verbs.txt') -> Tuple[Dict[str, Sequ
                 else:
                     if '-*-' not in content:
                         levin_dict[key] = [x.lower() for x in content.split()]
-                        for k in levin_dict[key]:
-                            compressed_levin_dict[key_compressed].append(k)
+                        compressed_levin_dict[key_compressed].extend(levin_dict[key])
                     content = ""
         if '-*-' not in content:
             levin_dict[key] = [x.lower() for x in content.split()]
-            for k in levin_dict[key]:
-                compressed_levin_dict[key_compressed].append(k)
+            compressed_levin_dict[key_compressed].extend(levin_dict[key])
     return levin_dict, compressed_levin_dict
 
 
-def parse_levin_dict(levin_dict: Dict[str, Sequence[str]],
-                     path: str = 'data/levin_semantic_broad.json') -> Tuple[Dict[str, Sequence[str]],
-                                                                            Dict[str, Sequence[str]],
-                                                                            Dict[str, Sequence[str]]]:
+def parse_levin_dict(levin_dict: Mapping[str, Sequence[str]],
+                     path: str = 'data/levin_semantic_broad.json') -> Tuple[Mapping[str, Container[str]],
+                                                                            Mapping[str, Sequence[str]],
+                                                                            Mapping[str, Sequence[str]]]:
     with open(path) as file:
-        map_int_to_name = json.load(file)
+        map_int_to_name = {int(k): v for k, v in json.load(file).items()}
 
-    levin_semantic_broad, levin_semantic_all, levin_alternations = {}, {}, {}
+    levin_semantic_broad = defaultdict(set)
+    levin_semantic_all, levin_alternations = {}, {}
     for key, value in levin_dict.items():
         int_key = int(key.split(" ", maxsplit=1)[0].split(".", maxsplit=1)[0])
         if int_key <= 8:
             levin_alternations[key] = value
         else:
             levin_semantic_all[key] = value
-            name_key = map_int_to_name[str(int_key)]
-            if name_key not in levin_semantic_broad:
-                levin_semantic_broad[name_key] = []
-            for v in value:
-                if v not in levin_semantic_broad[name_key]:
-                    levin_semantic_broad[name_key].append(v)
+            name_key = map_int_to_name[int_key]
+            levin_semantic_broad[name_key].update(value)
     return levin_semantic_broad, levin_semantic_all, levin_alternations
 
 
-def transform_features(df: pd.DataFrame) -> Tuple:
-    ohe = OneHotEncoder(handle_unknown="ignore")
-    transformed = ohe.fit_transform(df[['POS']])
+def transform_features(df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+                                                  np.ndarray, np.ndarray, np.ndarray, Sequence[str], Sequence[str]]:
+    one_hot_encoder = OneHotEncoder(handle_unknown="ignore")
+    transformed = one_hot_encoder.fit_transform(df[['POS']])
     one_hot_pos = transformed.toarray()
-    pos_categ = ohe.categories_[0].tolist()
+    pos_category = one_hot_encoder.categories_[0].tolist()
 
-    mlb = MultiLabelBinarizer()
+    binarizer = MultiLabelBinarizer()
     df_concat = pd.concat([df['Levin-change'], df['Levin-inplace']])
-    one_hot_levin = mlb.fit_transform(df_concat)
+    one_hot_levin = binarizer.fit_transform(df_concat)
     one_hot_levin_change, one_hot_levin_inplace = np.split(one_hot_levin, 2)
-    levin_classes = mlb.classes_.tolist()
+    levin_classes = binarizer.classes_.tolist()
 
-    mlb = MultiLabelBinarizer()
+    binarizer = MultiLabelBinarizer()
     df_concat = pd.concat([df['LIWC-change'], df['LIWC-inplace']])
-    one_hot_liwc = mlb.fit_transform(df_concat)
+    one_hot_liwc = binarizer.fit_transform(df_concat)
     one_hot_liwc_change, one_hot_liwc_inplace = np.split(one_hot_liwc, 2)
-    liwc_classes = mlb.classes_.tolist()
+    liwc_classes = binarizer.classes_.tolist()
 
-    concret_w_change = df['concret-change'].to_numpy()
-    concret_w_change = np.expand_dims(concret_w_change, axis=1)
-    concret_w_inplace = df['concret-inplace'].to_numpy()
-    concret_w_inplace = np.expand_dims(concret_w_inplace, axis=1)
+    concreteness_w_change = df['concreteness-change'].to_numpy()
+    concreteness_w_change = np.expand_dims(concreteness_w_change, axis=1)
+    concreteness_w_inplace = df['concreteness-inplace'].to_numpy()
+    concreteness_w_inplace = np.expand_dims(concreteness_w_inplace, axis=1)
 
     cosine_sim = df['cosine-sim'].to_numpy()
     cosine_sim = np.expand_dims(cosine_sim, axis=1)
 
-    # wup_sim = df['wup_sim'].to_numpy() #TODO: What to do with words with no synsets?
-    # wup_sim = np.expand_dims(wup_sim, axis=1)
-    feat_categorical_names = ["_POS-" + str(i) for i in pos_categ] + \
+    feat_categorical_names = ["_POS-" + str(i) for i in pos_category] + \
                              ["Levin-change_" + str(i) for i in levin_classes] + \
                              ["Levin-inplace_" + str(i) for i in levin_classes] + \
                              ["LIWC-change_" + str(i) for i in liwc_classes] + \
                              ["LIWC-inplace_" + str(i) for i in liwc_classes]
-    feat_continuous_names = ["_concret-change", "_concret-inplace", "_cosine-sim"]
+    feat_continuous_names = ["_concreteness-change", "_concreteness-inplace", "_cosine-sim"]
 
     return (one_hot_pos, one_hot_levin_change, one_hot_levin_inplace, one_hot_liwc_change, one_hot_liwc_inplace,
-            concret_w_change, concret_w_inplace, cosine_sim, feat_categorical_names, feat_continuous_names)
+            concreteness_w_change, concreteness_w_inplace, cosine_sim, feat_categorical_names, feat_continuous_names)
 
 
-def get_changed_word(pos_triplet: str, neg_triplet: str, neg_type: str) -> Tuple[str, str]:
+def get_changed_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: str) -> Tuple[str, str]:
     if neg_type == 's':
         return pos_triplet[0], neg_triplet[0]
     elif neg_type == 'v':
@@ -358,7 +321,7 @@ def get_changed_word(pos_triplet: str, neg_triplet: str, neg_type: str) -> Tuple
         raise ValueError(f"Wrong neg_type: {neg_type}, needs to be from s,v,o")
 
 
-def get_bert_data(clip_results: Sequence) -> None:
+def get_bert_data(clip_results: Sequence[Instance]) -> None:
     list_word_sentence, set_words = [], set()
     for _, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, _, _ in clip_results:
         word_changed, word_inplace = get_changed_word(pos_triplet, neg_triplet, neg_type)
@@ -372,21 +335,19 @@ def get_bert_data(clip_results: Sequence) -> None:
         set_words.add(word_changed)
     print(len(list_word_sentence))
     save_bert_embeddings_sentences(list_word_sentence)
-    # save_bert_embeddings(set_words)
 
 
-def get_features(clip_results, path: str = "data/bert_embeddings.npy",
+def get_features(clip_results: Sequence[Instance], path: str = "data/bert_embeddings.npy",
                  max_feature_count: Optional[int] = None) -> Tuple[pd.DataFrame, Sequence[int]]:
     dict_features = {"index": [], "sent": [], "n_sent": [], "word_changed": [], "word_inplace": [], "POS": [],
                      "Levin-change": [], "Levin-inplace": [], "LIWC-change": [], "LIWC-inplace": [],
-                     "concret-change": [], "concret-inplace": [], "cosine-sim": [], "label": [],
+                     "concreteness-change": [], "concreteness-inplace": [], "cosine-sim": [], "label": [],
                      "clip-score-diff": []}
 
     levin_dict, compressed_levin_dict = parse_levin_file()
     levin_semantic_broad, levin_semantic_all, levin_alternations = parse_levin_dict(levin_dict)
     dict_liwc, _ = parse_liwc_file()
     dict_concreteness = parse_concreteness_file()
-    # bert_embeddings_sentences = np.load("data/bert_embeddings_sentences.npy", allow_pickle=True).item()  # transform from ndarray to dict
     bert_embeddings = np.load(path, allow_pickle=True).item()  # transform from ndarray to dict
 
     if max_feature_count:
@@ -410,8 +371,8 @@ def get_features(clip_results, path: str = "data/bert_embeddings.npy",
         liwc_category_w_changed = get_liwc_category(word_changed, dict_liwc)
         liwc_category_w_inplace = get_liwc_category(word_inplace, dict_liwc)
 
-        concret_w_change = get_concreteness_score(word_changed, dict_concreteness)
-        concret_w_inplace = get_concreteness_score(word_inplace, dict_concreteness)
+        concreteness_w_change = get_concreteness_score(word_changed, dict_concreteness)
+        concreteness_w_inplace = get_concreteness_score(word_inplace, dict_concreteness)
 
         dict_features["index"].append(index)
         dict_features["sent"].append(sentence)
@@ -426,36 +387,35 @@ def get_features(clip_results, path: str = "data/bert_embeddings.npy",
         dict_features["LIWC-change"].append(liwc_category_w_changed)
         dict_features["LIWC-inplace"].append(liwc_category_w_inplace)
         # dict_features["concreteness"].append(concreteness_score_w_changed)
-        dict_features["concret-change"].append(concret_w_change)
-        dict_features["concret-inplace"].append(concret_w_inplace)
+        dict_features["concreteness-change"].append(concreteness_w_change)
+        dict_features["concreteness-inplace"].append(concreteness_w_inplace)
         dict_features["cosine-sim"].append(cosine_sim)
-        # dict_features["wup_sim"].append(wnet_sim)
-        # dict_features["WordNet"].append(wnet_category)
 
         # TODO: predict when CLIP result is pos or neg? - I think we want to learn when CLIP fails
-        dict_features["label"].append(0 if clip_prediction == 'pos' else 1)
-        # dict_features["label"].append(1 if clip_prediction == 'pos' else 0)
+        dict_features["label"].append(int(clip_prediction != 'pos'))
         dict_features["clip-score-diff"].append(clip_score_diff)
 
     levin_liwc = [item for sublist in dict_features["Levin-change"] + dict_features["Levin-inplace"] +
                   dict_features["LIWC-change"] + dict_features["LIWC-inplace"] for item in sublist]
-    features_count = levin_liwc + ["POS-" + v for v in dict_features["POS"]] + \
-                     ["cosine-sim"] * len(dict_features["cosine-sim"]) + \
-                     ["concret-change"] * len(dict_features["concret-change"]) + \
-                     ["concret-inplace"] * len(dict_features["concret-inplace"])
+    features_count = (levin_liwc + ["POS-" + v for v in dict_features["POS"]] +
+                      ["cosine-sim"] * len(dict_features["cosine-sim"]) +
+                      ["concreteness-change"] * len(dict_features["concreteness-change"]) +
+                      ["concreteness-inplace"] * len(dict_features["concreteness-inplace"]))
     df = pd.DataFrame.from_dict(dict_features)
-    # print(df[['word_changed', 'word_inplace', 'cosine-sim']].to_string())
     return df, features_count
 
 
-def pre_process_features(one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace, one_hot_liwc_change,
-                         one_hot_liwc_inplace, concret_w_change, concret_w_inplace, cosine_sim,
-                         feat_categorical_names, feat_continuous_names) -> Tuple[np.ndarray, Sequence[str]]:
+def pre_process_features(one_hot_pos: np.ndarray, one_hot_levin_w_change: np.ndarray,
+                         one_hot_levin_w_inplace: np.ndarray, one_hot_liwc_change: np.ndarray,
+                         one_hot_liwc_inplace: np.ndarray, concreteness_w_change: np.ndarray,
+                         concreteness_w_inplace: np.ndarray, cosine_sim: np.ndarray,
+                         feat_categorical_names: Sequence[str],
+                         feat_continuous_names: Sequence[str]) -> Tuple[np.ndarray, Sequence[str]]:
     feat_categorical = np.concatenate((one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
                                        one_hot_liwc_change, one_hot_liwc_inplace), axis=1)
     print(f"categorical feature size: {feat_categorical.shape}")
 
-    feat_continuous = np.concatenate((concret_w_change, concret_w_inplace, cosine_sim), axis=1)
+    feat_continuous = np.concatenate((concreteness_w_change, concreteness_w_inplace, cosine_sim), axis=1)
     scaler = preprocessing.StandardScaler()
     scaler.fit(feat_continuous)  # standardize continuous features
     feat_continuous_scaled = scaler.transform(feat_continuous)
@@ -463,7 +423,7 @@ def pre_process_features(one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_in
 
     # concatenate categorical (one hot) with scaled continuous features
     features = np.concatenate((feat_categorical, feat_continuous_scaled), axis=1)
-    feature_names = feat_categorical_names + feat_continuous_names
+    feature_names = list(itertools.chain(feat_categorical_names, feat_continuous_names))
 
     print(f"all (categorical + continuous) features size: {features.shape}")
     return features, feature_names
@@ -511,8 +471,8 @@ def evaluate(method_name: str, labels_test: np.ndarray, predicted: Sequence[int]
     recall = recall_score(labels_test, predicted) * 100
     f1 = f1_score(labels_test, predicted) * 100
     roc_auc = roc_auc_score(labels_test, predicted) * 100
-    print(
-        f"Method {method_name}, A: {accuracy:.2f}, P: {precision:.2f}, R: {recall:.2f}, F1: {f1:.2f}, ROC-AUC: {roc_auc:.2f}")
+    print(f"Method {method_name}, A: {accuracy:.2f}, P: {precision:.2f}, R: {recall:.2f}, F1: {f1:.2f},"
+          f" ROC-AUC: {roc_auc:.2f}")
     print(f"Counter predicted: {Counter(predicted)}")
     print(f"Counter GT: {Counter(labels_test)}")
 
@@ -530,23 +490,20 @@ def print_metrics(df: pd.DataFrame, feature_names: Sequence[str], features: np.n
     print(f"--Levin semantic_all nb classes: {len(levin_semantic_all.keys())}")
     print(f"--Levin alternations nb classes: {len(levin_alternations.keys())}")
 
-    liwc_dict, liwc_categ = parse_liwc_file()
-    print(f"LIWC total nb classes: {len(liwc_categ)}")
+    liwc_dict, liwc_categories = parse_liwc_file()
+    print(f"LIWC total number of classes: {len(liwc_categories)}")
 
 
 def merge_csvs_and_filter_data(probes_path: str = "data/svo_probes.csv", neg_path: str = "data/neg_d.csv",
                                output_path: str = "data/merged.csv") -> None:
     df_probes = pd.read_csv(probes_path, index_col="index")
+
     df_probes.drop(df_probes.index[df_probes["sentence"] == 'woman, ball, outside'], inplace=True)
     df_probes.drop(df_probes.index[df_probes["sentence"] == 'woman, music, notes'], inplace=True)
-    # df_probes.drop(df_probes.index[df_probes["sentence"] == 'People on a team running.'], inplace=True)
-    # df_probes.drop(df_probes.index[df_probes["sentence"] == 'People playing on a team.'], inplace=True)
 
     df_neg = pd.read_csv(neg_path, header=0)
     df_neg.drop(df_neg.index[df_neg["neg_sentence"] == 'woman, ball, outside'], inplace=True)
     df_neg.drop(df_neg.index[df_neg["neg_sentence"] == 'woman, music, notes'], inplace=True)
-    # df_neg.drop(df_neg.index[df_neg["neg_sentence"] == 'People on a team running.'], inplace=True)
-    # df_neg.drop(df_neg.index[df_neg["neg_sentence"] == 'People playing on a team.'], inplace=True)
 
     result = pd.concat([df_probes, df_neg["neg_sentence"]], axis=1)
     result = result[result["sentence"].notna()]
@@ -561,22 +518,21 @@ def delete_multiple_element(list_object: List[int], indices: Sequence[int]) -> N
             list_object.pop(idx)
 
 
-def process_features(clip_results,
+def process_features(clip_results: Sequence[Instance],
                      max_feature_count: Optional[int] = None) -> Tuple[np.ndarray, Sequence[str], Sequence[int],
                                                                        np.ndarray]:
     df, features_count = get_features(clip_results, max_feature_count=max_feature_count)
     labels = df['label'].to_numpy()
-    # get_bert_data(clip_results)
 
-    one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace, one_hot_liwc_change, one_hot_liwc_inplace, \
-        concret_w_change, concret_w_inplace, cosine_sim, feat_categorical_names, feat_continuous_names = \
+    (one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace, one_hot_liwc_change, one_hot_liwc_inplace,
+     concreteness_w_change, concreteness_w_inplace, cosine_sim, feat_categorical_names, feat_continuous_names) = \
         transform_features(df)
 
     # categorical feature selection, standardize (scale) continuous features and concatenate categorical & continuous
     features, feature_names = pre_process_features(one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
-                                                   one_hot_liwc_change, one_hot_liwc_inplace, concret_w_change,
-                                                   concret_w_inplace,
-                                                   cosine_sim, feat_categorical_names, feat_continuous_names)
+                                                   one_hot_liwc_change, one_hot_liwc_inplace, concreteness_w_change,
+                                                   concreteness_w_inplace, cosine_sim, feat_categorical_names,
+                                                   feat_continuous_names)
 
     print_metrics(df, feature_names, features)
     return features, feature_names, features_count, labels
@@ -636,7 +592,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    # get_wnet_category(word='', pos='')
     # merge_csvs_and_filter_data()
 
     clip_results = read_data()
