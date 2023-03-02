@@ -47,7 +47,7 @@ def get_first_triplet(triplets: Sequence[Triplet]) -> Triplet:
 
 def get_sentence_match_triplet(triplets: Sequence[Triplet], sentence: str) -> Triplet:
     if "people" in sentence.split():
-        triplets = [(s.replace('person', 'people'), v.replace('person', 'people'), o.replace('person', 'people'))
+        triplets = [(s.replace("person", "people"), v.replace("person", "people"), o.replace("person", "people"))
                     for s, v, o in triplets]
 
     if len(triplets) == 1:
@@ -67,7 +67,7 @@ def get_sentence_match_triplet(triplets: Sequence[Triplet], sentence: str) -> Tr
 def pre_process_sentences(sentence: str) -> str:
     if type(sentence) == str:
         sentence = sentence.lower()
-        sentence = sentence.translate(str.maketrans('', '', string.punctuation))
+        sentence = sentence.translate(str.maketrans("", "", string.punctuation))
     else:
         sentence = ""
     return sentence
@@ -76,11 +76,11 @@ def pre_process_sentences(sentence: str) -> str:
 def read_data(path: str = "data/merged.csv") -> Sequence[Instance]:
     df = pd.read_csv(path, index_col=0)
     df = df.sort_index()
-    df['index'] = df.index
+    df["index"] = df.index
     results = []
     for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction, clip_score_diff in \
-            zip(df['index'], df['sentence'], df['neg_sentence'], df['pos_triplet'], df['neg_triplet'], df['neg_type'],
-                df['clip prediction'], df['clip_score_diff']):
+            zip(df["index"], df["sentence"], df["neg_sentence"], df["pos_triplet"], df["neg_triplet"], df["neg_type"],
+                df["clip prediction"], df["clip_score_diff"]):
 
         sentence = pre_process_sentences(sentence)  # remove punctuation
         neg_sentence = pre_process_sentences(neg_sentence)
@@ -100,7 +100,7 @@ def read_data(path: str = "data/merged.csv") -> Sequence[Instance]:
     return results
 
 
-def parse_liwc_file(path: str = 'data/LIWC.2015.all.txt') -> Tuple[Mapping[str, Sequence[str]], Set[str]]:
+def parse_liwc_file(path: str = "data/LIWC.2015.all.txt") -> Tuple[Mapping[str, Sequence[str]], Set[str]]:
     dict_liwc = defaultdict(list)
     liwc_categories = set()
     with open(path) as file:
@@ -111,7 +111,7 @@ def parse_liwc_file(path: str = 'data/LIWC.2015.all.txt') -> Tuple[Mapping[str, 
     return dict_liwc, liwc_categories
 
 
-def parse_concreteness_file(path: str = 'data/concreteness.txt') -> Mapping[str, float]:
+def parse_concreteness_file(path: str = "data/concreteness.txt") -> Mapping[str, float]:
     dict_concreteness = {}
     with open(path) as file:
         next(file)  # Skip the first line.
@@ -135,16 +135,16 @@ def get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Sequ
 
 
 def get_wup_similarity(word_changed: str, word_inplace: str, pos: str) -> float:
-    if pos == 's' or pos == 'o':
-        pos = 'n'  # TODO: it might have other types of words different from nouns.
+    if pos == "s" or pos == "o":
+        pos = "n"  # TODO: it might have other types of words different from nouns.
 
     try:
-        syn1 = wordnet.synset(".".join([word_changed, pos, '01']))
+        syn1 = wordnet.synset(".".join([word_changed, pos, "01"]))
     except wordnet.WordNetError:
         syn1 = wordnet.synsets(word_changed)[0]
 
     try:
-        syn2 = wordnet.synset(".".join([word_inplace, pos, '01']))
+        syn2 = wordnet.synset(".".join([word_inplace, pos, "01"]))
     except wordnet.WordNetError:
         syn2 = wordnet.synsets(word_inplace)[0]
 
@@ -163,13 +163,13 @@ def compute_embedding(word_type: str, sentence: str) -> np.ndarray:
         elif word_type in map_word_token_idx:
             token_ids = map_word_token_idx[word_type]
         else:
-            all_word_forms = get_word_forms(word_type)['v']
+            all_word_forms = get_word_forms(word_type)["v"]
             for word in all_word_forms:
                 if word in map_word_token_idx:
                     token_ids = map_word_token_idx[word]
                     break
         if token_ids:
-            index_word = [inputs['input_ids'].tolist()[0].index(token_id) for token_id in token_ids]
+            index_word = [inputs["input_ids"].tolist()[0].index(token_id) for token_id in token_ids]
         else:  # treat as separate word / not part of a sentence
             inputs = tokenizer(word_type, return_tensors="pt")
             index_word = [1]
@@ -222,7 +222,7 @@ def get_concreteness_score(word: str, dict_concreteness: Mapping[str, float]) ->
     return dict_concreteness.get(word, 3)  # 3 is the mean of all the scores, to not influence the results.
 
 
-def parse_levin_file(path: str = 'data/levin_verbs.txt') -> Tuple[Mapping[str, Sequence[str]],
+def parse_levin_file(path: str = "data/levin_verbs.txt") -> Tuple[Mapping[str, Sequence[str]],
                                                                   Mapping[str, Sequence[str]]]:
     content = ""
     levin_dict = {}
@@ -235,21 +235,21 @@ def parse_levin_file(path: str = 'data/levin_verbs.txt') -> Tuple[Mapping[str, S
                 key_compressed = key.split(" ")[0].split(".")[0]
             else:
                 if line:
-                    content += line.replace('\r\n', "").rstrip()
+                    content += line.replace("\r\n", "").rstrip()
                     content += " "
                 else:
-                    if '-*-' not in content:
+                    if "-*-" not in content:
                         levin_dict[key] = [x.lower() for x in content.split()]
                         compressed_levin_dict[key_compressed].extend(levin_dict[key])
                     content = ""
-        if '-*-' not in content:
+        if "-*-" not in content:
             levin_dict[key] = [x.lower() for x in content.split()]
             compressed_levin_dict[key_compressed].extend(levin_dict[key])
     return levin_dict, compressed_levin_dict
 
 
 def parse_levin_dict(levin_dict: Mapping[str, Sequence[str]],
-                     path: str = 'data/levin_semantic_broad.json') -> Tuple[Mapping[str, Container[str]],
+                     path: str = "data/levin_semantic_broad.json") -> Tuple[Mapping[str, Container[str]],
                                                                             Mapping[str, Sequence[str]],
                                                                             Mapping[str, Sequence[str]]]:
     with open(path) as file:
@@ -271,28 +271,28 @@ def parse_levin_dict(levin_dict: Mapping[str, Sequence[str]],
 def transform_features(df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
                                                   np.ndarray, np.ndarray, np.ndarray, Sequence[str], Sequence[str]]:
     one_hot_encoder = OneHotEncoder(handle_unknown="ignore")
-    transformed = one_hot_encoder.fit_transform(df[['POS']])
+    transformed = one_hot_encoder.fit_transform(df[["POS"]])
     one_hot_pos = transformed.toarray()
     pos_category = one_hot_encoder.categories_[0].tolist()
 
     binarizer = MultiLabelBinarizer()
-    df_concat = pd.concat([df['Levin-change'], df['Levin-inplace']])
+    df_concat = pd.concat([df["Levin-change"], df["Levin-inplace"]])
     one_hot_levin = binarizer.fit_transform(df_concat)
     one_hot_levin_change, one_hot_levin_inplace = np.split(one_hot_levin, 2)
     levin_classes = binarizer.classes_.tolist()
 
     binarizer = MultiLabelBinarizer()
-    df_concat = pd.concat([df['LIWC-change'], df['LIWC-inplace']])
+    df_concat = pd.concat([df["LIWC-change"], df["LIWC-inplace"]])
     one_hot_liwc = binarizer.fit_transform(df_concat)
     one_hot_liwc_change, one_hot_liwc_inplace = np.split(one_hot_liwc, 2)
     liwc_classes = binarizer.classes_.tolist()
 
-    concreteness_w_change = df['concreteness-change'].to_numpy()
+    concreteness_w_change = df["concreteness-change"].to_numpy()
     concreteness_w_change = np.expand_dims(concreteness_w_change, axis=1)
-    concreteness_w_inplace = df['concreteness-inplace'].to_numpy()
+    concreteness_w_inplace = df["concreteness-inplace"].to_numpy()
     concreteness_w_inplace = np.expand_dims(concreteness_w_inplace, axis=1)
 
-    cosine_sim = df['cosine-sim'].to_numpy()
+    cosine_sim = df["cosine-sim"].to_numpy()
     cosine_sim = np.expand_dims(cosine_sim, axis=1)
 
     feat_categorical_names = ["_POS-" + str(i) for i in pos_category] + \
@@ -307,11 +307,11 @@ def transform_features(df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.nda
 
 
 def get_changed_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: str) -> Tuple[str, str]:
-    if neg_type == 's':
+    if neg_type == "s":
         return pos_triplet[0], neg_triplet[0]
-    elif neg_type == 'v':
+    elif neg_type == "v":
         return pos_triplet[1], neg_triplet[1]
-    elif neg_type == 'o':
+    elif neg_type == "o":
         return pos_triplet[2], neg_triplet[2]
     else:
         raise ValueError(f"Wrong neg_type: {neg_type}, needs to be from s,v,o")
@@ -358,7 +358,7 @@ def get_features(clip_results: Sequence[Instance], path: str = "data/bert_embedd
             continue
 
         cosine_sim = get_cosine_similarity(word_changed, word_inplace, bert_embeddings)  # noqa
-        if neg_type == 'v':  # TODO: How []/ No Levin or LIWC class influence results
+        if neg_type == "v":  # TODO: How []/ No Levin or LIWC class influence results
             levin_classes_w_changed = get_levin_category(word_changed, levin_semantic_broad)
             levin_classes_w_inplace = get_levin_category(word_inplace, levin_semantic_broad)
         else:
@@ -388,7 +388,7 @@ def get_features(clip_results: Sequence[Instance], path: str = "data/bert_embedd
         dict_features["cosine-sim"].append(cosine_sim)
 
         # TODO: predict when CLIP result is pos or neg? - I think we want to learn when CLIP fails
-        dict_features["label"].append(int(clip_prediction != 'pos'))
+        dict_features["label"].append(int(clip_prediction != "pos"))
         dict_features["clip-score-diff"].append(clip_score_diff)
 
     levin_liwc = [item for sublist in dict_features["Levin-change"] + dict_features["Levin-inplace"] +
@@ -434,11 +434,11 @@ def plot_coef_weights(coef_weights: np.ndarray, feature_names: Sequence[str],
     top_coefficients = np.hstack([top_negative_coefficients, top_positive_coefficients])
 
     fig = plt.figure(figsize=(18, 7))
-    colors = ['red' if c < 0 else 'green' for c in coef[top_coefficients]]
+    colors = ["red" if c < 0 else "green" for c in coef[top_coefficients]]
     plt.bar(np.arange(2 * top_features), coef[top_coefficients], color=colors)
     feature_names = np.array(feature_names)
-    plt.xticks(np.arange(2 * top_features), feature_names[top_coefficients], rotation=45, ha='right')
-    fig.savefig(path, bbox_inches='tight')
+    plt.xticks(np.arange(2 * top_features), feature_names[top_coefficients], rotation=45, ha="right")
+    fig.savefig(path, bbox_inches="tight")
 
 
 # https://www.kaggle.com/code/pierpaolo28/pima-indians-diabetes-database/notebook
@@ -457,7 +457,7 @@ def print_sorted_coef_weights(coef: np.ndarray, coef_significance: np.ndarray, c
     df = pd.DataFrame(
         zip(sorted_feature_names, sorted_feature_significance, sorted_feature_counts, sorted_coefficients,
             sorted_feature_sign),
-        columns=['Feature', 'Significance', 'Data Count', 'Weight (abs)', 'Weight sign'])
+        columns=["Feature", "Significance", "Data Count", "Weight (abs)", "Weight sign"])
     df.to_csv(output_path, index=False)
 
 
@@ -494,12 +494,12 @@ def merge_csvs_and_filter_data(probes_path: str = "data/svo_probes.csv", neg_pat
                                output_path: str = "data/merged.csv") -> None:
     df_probes = pd.read_csv(probes_path, index_col="index")
 
-    df_probes.drop(df_probes.index[df_probes["sentence"] == 'woman, ball, outside'], inplace=True)
-    df_probes.drop(df_probes.index[df_probes["sentence"] == 'woman, music, notes'], inplace=True)
+    df_probes.drop(df_probes.index[df_probes["sentence"] == "woman, ball, outside"], inplace=True)
+    df_probes.drop(df_probes.index[df_probes["sentence"] == "woman, music, notes"], inplace=True)
 
     df_neg = pd.read_csv(neg_path, header=0)
-    df_neg.drop(df_neg.index[df_neg["neg_sentence"] == 'woman, ball, outside'], inplace=True)
-    df_neg.drop(df_neg.index[df_neg["neg_sentence"] == 'woman, music, notes'], inplace=True)
+    df_neg.drop(df_neg.index[df_neg["neg_sentence"] == "woman, ball, outside"], inplace=True)
+    df_neg.drop(df_neg.index[df_neg["neg_sentence"] == "woman, music, notes"], inplace=True)
 
     result = pd.concat([df_probes, df_neg["neg_sentence"]], axis=1)
     result = result[result["sentence"].notna()]
@@ -509,16 +509,16 @@ def merge_csvs_and_filter_data(probes_path: str = "data/svo_probes.csv", neg_pat
 
 def delete_multiple_element(list_object: List[int], indices: Sequence[int]) -> None:
     indices = sorted(indices, reverse=True)
-    for idx in indices:
-        if idx < len(list_object):
-            list_object.pop(idx)
+    for i in indices:
+        if i < len(list_object):
+            list_object.pop(i)
 
 
 def process_features(clip_results: Sequence[Instance],
                      max_feature_count: Optional[int] = None) -> Tuple[np.ndarray, Sequence[str], Sequence[int],
                                                                        np.ndarray]:
     df, features_count = get_features(clip_results, max_feature_count=max_feature_count)
-    labels = df['label'].to_numpy()
+    labels = df["label"].to_numpy()
 
     (one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace, one_hot_liwc_change, one_hot_liwc_inplace,
      concreteness_w_change, concreteness_w_inplace, cosine_sim, feat_categorical_names, feat_continuous_names) = \
@@ -535,7 +535,7 @@ def process_features(clip_results: Sequence[Instance],
 
 
 def build_classifier() -> svm.LinearSVC:
-    return svm.LinearSVC(class_weight='balanced', max_iter=1_000_000)
+    return svm.LinearSVC(class_weight="balanced", max_iter=1_000_000)
 
 
 def classify_shuffled(features: np.ndarray, labels: np.ndarray, seed: int) -> np.ndarray:
@@ -566,15 +566,9 @@ def analyse_coef_weights(features: np.ndarray, labels: np.ndarray,
             pool.imap_unordered(partial(classify_shuffled, features, labels), range(iterations)),
             total=iterations, desc="Computing the coefficients with shuffled columns"))
 
-    coef_significance = []
-    for i, coef in enumerate(coef_weights):
-        significance = 0
-        for list_coef in list_shuffled_coef_weights:
-            if list_coef[i] <= coef:
-                significance += 1
-        coef_significance.append(significance)
+    coef_significance = np.array([sum(list_coef[i] <= coef for list_coef in list_shuffled_coef_weights)
+                                  for i, coef in enumerate(coef_weights)])
 
-    coef_significance = np.array(coef_significance)
     return coef_weights, coef_significance, coef_sign
 
 
@@ -595,6 +589,7 @@ def main() -> None:
                                                                        max_feature_count=1000 if args.debug else None)
     coef_weights, coef_significance, coef_sign = analyse_coef_weights(features, labels, args.iterations)
     print_sorted_coef_weights(coef_weights, coef_significance, coef_sign, feature_names, features_count)
+
     # plot_coef_weights(coef_weights, feature_names)
 
 
