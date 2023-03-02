@@ -128,14 +128,10 @@ def get_levin_category(word: str, dict_levin_semantic: Mapping[str, Container[st
 
 
 def get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Sequence[str]:
-    list_categories = []
-    for key, category in dict_liwc.items():
-        if key == word:
-            list_categories.append(category)
-        elif key[-1] == "*" and key[:-1] in word:
-            list_categories.append(category)
-
-    return [x for xs in list_categories for x in xs]
+    return [category_word
+            for key, category_words in dict_liwc.items()
+            if key == word or (key[-1] == "*" and key[:-1] in word)
+            for category_word in category_words]
 
 
 def get_wup_similarity(word_changed: str, word_inplace: str, pos: str) -> float:
