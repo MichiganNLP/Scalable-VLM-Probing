@@ -3,6 +3,7 @@ nltk==3.7
 numpy==1.23.2
 pandas==1.4.4
 scikit-learn==1.1.2
+statsmodels==0.13.5
 torch==1.12.1
 tqdm==4.64.1
 transformers==4.21.3

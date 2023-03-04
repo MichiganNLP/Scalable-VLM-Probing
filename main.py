@@ -12,6 +12,7 @@ from typing import Container, List, Mapping, Optional, Sequence, Set, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 import torch
 from nltk.corpus import wordnet
 from nltk.stem import PorterStemmer, WordNetLemmatizer
@@ -28,7 +29,7 @@ Instance = Tuple[int, str, str, Triplet, Triplet, str, bool, float]
 
 model_name = "bert-base-uncased"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModel.from_pretrained(model_name)
+text_model = AutoModel.from_pretrained(model_name)
 
 stemmer = PorterStemmer()
 lemmatizer = WordNetLemmatizer()
@@ -134,19 +135,19 @@ def get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Sequ
             for category_word in category_words]
 
 
-def get_wup_similarity(word_changed: str, word_inplace: str, pos: str) -> float:
+def get_wup_similarity(word_original: str, word_replacement: str, pos: str) -> float:
     if pos == "s" or pos == "o":
         pos = "n"  # TODO: it might have other types of words different from nouns.
 
     try:
-        syn1 = wordnet.synset(".".join([word_changed, pos, "01"]))
+        syn1 = wordnet.synset(".".join([word_original, pos, "01"]))
     except wordnet.WordNetError:
-        syn1 = wordnet.synsets(word_changed)[0]
+        syn1 = wordnet.synsets(word_original)[0]
 
     try:
-        syn2 = wordnet.synset(".".join([word_inplace, pos, "01"]))
+        syn2 = wordnet.synset(".".join([word_replacement, pos, "01"]))
     except wordnet.WordNetError:
-        syn2 = wordnet.synsets(word_inplace)[0]
+        syn2 = wordnet.synsets(word_replacement)[0]
 
     return syn1.wup_similarity(syn2)
 
@@ -178,7 +179,7 @@ def compute_embedding(word_type: str, sentence: str) -> np.ndarray:
         index_word = [1]
 
     with torch.inference_mode():
-        outputs = model(**inputs)
+        outputs = text_model(**inputs)
 
     embedding_word = np.mean(outputs.last_hidden_state.detach().numpy()[0][index_word[0]:index_word[-1] + 1], axis=0)
     return np.expand_dims(embedding_word, axis=0)
@@ -189,7 +190,7 @@ def save_bert_embeddings(list_words: Sequence[str], path: str = "data/bert_embed
     for word in list_words:
         inputs = tokenizer(word, return_tensors="pt")
         with torch.inference_mode():
-            outputs = model(**inputs)
+            outputs = text_model(**inputs)
         embedding_word = outputs.last_hidden_state.detach().numpy()[0][1]
         embedding_word = np.expand_dims(embedding_word, axis=0)
         word_embeddings[word] = embedding_word
@@ -205,17 +206,18 @@ def save_bert_embeddings_sentences(list_word_sentence: Sequence[Tuple[str, str]]
     np.save(path, dict_data)
 
 
-def get_cosine_similarity_sent(word_changed: str, word_inplace: str, sentence: str, neg_sentence: str,
+def get_cosine_similarity_sent(word_original: str, word_replacement: str, sentence: str, neg_sentence: str,
                                bert_embeddings: Mapping[Tuple[str, str], np.ndarray]) -> float:
-    embedding_word_changed = bert_embeddings[(word_changed, sentence)]
-    embedding_word_inplace = bert_embeddings[(word_inplace, neg_sentence)]
-    return cosine_similarity(embedding_word_changed, embedding_word_inplace)[0][0]
+    embedding_word_original = bert_embeddings[(word_original, sentence)]
+    embedding_word_replacement = bert_embeddings[(word_replacement, neg_sentence)]
+    return cosine_similarity(embedding_word_original, embedding_word_replacement)[0][0]
 
 
-def get_cosine_similarity(word_changed: str, word_inplace: str, bert_embeddings: Mapping[str, np.ndarray]) -> float:
-    embedding_word_changed = bert_embeddings[word_changed]
-    embedding_word_inplace = bert_embeddings[word_inplace]
-    return cosine_similarity(embedding_word_changed, embedding_word_inplace)[0][0]
+def get_cosine_similarity(word_original: str, word_replacement: str,
+                          bert_embeddings: Mapping[str, np.ndarray]) -> float:
+    embedding_word_original = bert_embeddings[word_original]
+    embedding_word_replacement = bert_embeddings[word_replacement]
+    return cosine_similarity(embedding_word_original, embedding_word_replacement)[0][0]
 
 
 def get_concreteness_score(word: str, dict_concreteness: Mapping[str, float]) -> float:
@@ -269,44 +271,47 @@ def parse_levin_dict(levin_dict: Mapping[str, Sequence[str]],
 
 
 def transform_features(df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
-                                                  np.ndarray, np.ndarray, np.ndarray, Sequence[str], Sequence[str]]:
+                                                  Sequence[str], Sequence[str]]:
     one_hot_encoder = OneHotEncoder(handle_unknown="ignore")
     transformed = one_hot_encoder.fit_transform(df[["POS"]])
     one_hot_pos = transformed.toarray()
     pos_category = one_hot_encoder.categories_[0].tolist()
 
     binarizer = MultiLabelBinarizer()
-    df_concat = pd.concat([df["Levin-change"], df["Levin-inplace"]])
+    df_concat = pd.concat([df["Levin-original"], df["Levin-replacement"]])
     one_hot_levin = binarizer.fit_transform(df_concat)
-    one_hot_levin_change, one_hot_levin_inplace = np.split(one_hot_levin, 2)
+    one_hot_levin_original, one_hot_levin_replacement = np.split(one_hot_levin, 2)
+    one_hot_levin_change = one_hot_levin_original + one_hot_levin_replacement
+    one_hot_levin_change[one_hot_levin_change == 2] = 0  # only represent change
     levin_classes = binarizer.classes_.tolist()
 
     binarizer = MultiLabelBinarizer()
-    df_concat = pd.concat([df["LIWC-change"], df["LIWC-inplace"]])
+    df_concat = pd.concat([df["LIWC-original"], df["LIWC-replacement"]])
     one_hot_liwc = binarizer.fit_transform(df_concat)
-    one_hot_liwc_change, one_hot_liwc_inplace = np.split(one_hot_liwc, 2)
+    one_hot_liwc_original, one_hot_liwc_replacement = np.split(one_hot_liwc, 2)
+    one_hot_liwc_change = one_hot_liwc_original + one_hot_liwc_replacement
+    one_hot_liwc_change[one_hot_liwc_change == 2] = 0  # only represent change
     liwc_classes = binarizer.classes_.tolist()
 
-    concreteness_w_change = df["concreteness-change"].to_numpy()
+    concreteness_w_original = df["concreteness-original"].to_numpy()
+    # concreteness_w_original = np.expand_dims(concreteness_w_original, axis=1)
+    concreteness_w_replacement = df["concreteness-replacement"].to_numpy()
+    concreteness_w_change = concreteness_w_original - concreteness_w_replacement
     concreteness_w_change = np.expand_dims(concreteness_w_change, axis=1)
-    concreteness_w_inplace = df["concreteness-inplace"].to_numpy()
-    concreteness_w_inplace = np.expand_dims(concreteness_w_inplace, axis=1)
 
     cosine_sim = df["cosine-sim"].to_numpy()
     cosine_sim = np.expand_dims(cosine_sim, axis=1)
 
-    feat_categorical_names = ["_POS-" + str(i) for i in pos_category] + \
-                             ["Levin-change_" + str(i) for i in levin_classes] + \
-                             ["Levin-inplace_" + str(i) for i in levin_classes] + \
-                             ["LIWC-change_" + str(i) for i in liwc_classes] + \
-                             ["LIWC-inplace_" + str(i) for i in liwc_classes]
-    feat_continuous_names = ["_concreteness-change", "_concreteness-inplace", "_cosine-sim"]
+    feat_categorical_names = ["POS_" + str(i) for i in pos_category] + \
+                             ["Levin_" + str(i) for i in levin_classes] + \
+                             ["LIWC_" + str(i) for i in liwc_classes]
+    feat_continuous_names = ["concreteness_", "cosine-sim_"]
 
-    return (one_hot_pos, one_hot_levin_change, one_hot_levin_inplace, one_hot_liwc_change, one_hot_liwc_inplace,
-            concreteness_w_change, concreteness_w_inplace, cosine_sim, feat_categorical_names, feat_continuous_names)
+    return (one_hot_pos, one_hot_levin_change, one_hot_liwc_change, concreteness_w_change, cosine_sim,
+            feat_categorical_names, feat_continuous_names)
 
 
-def get_changed_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: str) -> Tuple[str, str]:
+def get_original_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: str) -> Tuple[str, str]:
     if neg_type == "s":
         return pos_triplet[0], neg_triplet[0]
     elif neg_type == "v":
@@ -320,101 +325,98 @@ def get_changed_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: str) 
 def get_bert_data(clip_results: Sequence[Instance]) -> None:
     list_word_sentence, set_words = [], set()
     for _, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, _, _ in clip_results:
-        word_changed, word_inplace = get_changed_word(pos_triplet, neg_triplet, neg_type)
-        if not word_inplace or not word_changed:
+        word_original, word_replacement = get_original_word(pos_triplet, neg_triplet, neg_type)
+        if not word_replacement or not word_original:
             continue
-        if (word_changed, sentence) not in list_word_sentence:
-            list_word_sentence.append((word_changed, sentence))
-        if (word_inplace, neg_sentence) not in list_word_sentence:
-            list_word_sentence.append((word_inplace, neg_sentence))
-        set_words.add(word_inplace)
-        set_words.add(word_changed)
+        if (word_original, sentence) not in list_word_sentence:
+            list_word_sentence.append((word_original, sentence))
+        if (word_replacement, neg_sentence) not in list_word_sentence:
+            list_word_sentence.append((word_replacement, neg_sentence))
+        set_words.add(word_replacement)
+        set_words.add(word_original)
     print(len(list_word_sentence))
     save_bert_embeddings_sentences(list_word_sentence)
 
 
-def get_features(clip_results: Sequence[Instance], path: str = "data/bert_embeddings.npy",
+def get_features(clip_results: Sequence[Instance], bert_embeddings_path: str = "data/bert_embeddings.npy",  # noqa
                  max_feature_count: Optional[int] = None) -> Tuple[pd.DataFrame, Sequence[int]]:
-    dict_features = {"index": [], "sent": [], "n_sent": [], "word_changed": [], "word_inplace": [], "POS": [],
-                     "Levin-change": [], "Levin-inplace": [], "LIWC-change": [], "LIWC-inplace": [],
-                     "concreteness-change": [], "concreteness-inplace": [], "cosine-sim": [], "label": [],
+    dict_features = {"index": [], "sent": [], "n_sent": [], "word_original": [], "word_replacement": [], "POS": [],
+                     "Levin-original": [], "Levin-replacement": [], "LIWC-original": [], "LIWC-replacement": [],
+                     "concreteness-original": [], "concreteness-replacement": [], "cosine-sim": [], "label": [],
                      "clip-score-diff": []}
 
     levin_dict, compressed_levin_dict = parse_levin_file()
     levin_semantic_broad, levin_semantic_all, levin_alternations = parse_levin_dict(levin_dict)
     dict_liwc, _ = parse_liwc_file()
     dict_concreteness = parse_concreteness_file()
-    bert_embeddings = np.load(path, allow_pickle=True).item()  # transform from ndarray to dict
+    # bert_embeddings = np.load(path, allow_pickle=True).item()  # transform from ndarray to dict
 
     if max_feature_count:
         clip_results = clip_results[:max_feature_count]
 
     for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction, clip_score_diff in tqdm(
             clip_results, desc="Computing the features"):
-        word_changed, word_inplace = get_changed_word(pos_triplet, neg_triplet, neg_type)
+        word_original, word_replacement = get_original_word(pos_triplet, neg_triplet, neg_type)
 
-        if not word_inplace or not word_changed:
-            print(f"Found empty word changed or word inplace in index {index} not processing data and continue ...")
+        if not word_replacement or not word_original:
+            print(f"Found empty word original or word replacement in index {index} not processing data and continue…")
             continue
 
-        cosine_sim = get_cosine_similarity(word_changed, word_inplace, bert_embeddings)  # noqa
+        cosine_sim = np.random.randn()  # TODO: fix the BERT embeddings file to have all words.
+        #                                  Also, use something that actually supports cosine similarity, such as S-BERT.
+        # cosine_sim = get_cosine_similarity(word_original, word_replacement, bert_embeddings)  # noqa
+
         if neg_type == "v":  # TODO: How []/ No Levin or LIWC class influence results
-            levin_classes_w_changed = get_levin_category(word_changed, levin_semantic_broad)
-            levin_classes_w_inplace = get_levin_category(word_inplace, levin_semantic_broad)
+            levin_classes_w_original = get_levin_category(word_original, levin_semantic_broad)
+            levin_classes_w_replacement = get_levin_category(word_replacement, levin_semantic_broad)
         else:
-            levin_classes_w_changed, levin_classes_w_inplace = [], []
+            levin_classes_w_original, levin_classes_w_replacement = [], []
 
-        liwc_category_w_changed = get_liwc_category(word_changed, dict_liwc)
-        liwc_category_w_inplace = get_liwc_category(word_inplace, dict_liwc)
+        liwc_category_w_original = get_liwc_category(word_original, dict_liwc)
+        liwc_category_w_replacement = get_liwc_category(word_replacement, dict_liwc)
 
-        concreteness_w_change = get_concreteness_score(word_changed, dict_concreteness)
-        concreteness_w_inplace = get_concreteness_score(word_inplace, dict_concreteness)
+        concreteness_w_original = get_concreteness_score(word_original, dict_concreteness)
+        concreteness_w_replacement = get_concreteness_score(word_replacement, dict_concreteness)
 
         dict_features["index"].append(index)
         dict_features["sent"].append(sentence)
         dict_features["n_sent"].append(neg_sentence)
-        dict_features["word_changed"].append(word_changed)
-        dict_features["word_inplace"].append(word_inplace)
+        dict_features["word_original"].append(word_original)
+        dict_features["word_replacement"].append(word_replacement)
         dict_features["POS"].append(neg_type)
-        # dict_features["Levin"].append(levin_classes_w_changed)
-        dict_features["Levin-change"].append(levin_classes_w_changed)
-        dict_features["Levin-inplace"].append(levin_classes_w_inplace)
-        # dict_features["LIWC"].append(liwc_category_w_changed)
-        dict_features["LIWC-change"].append(liwc_category_w_changed)
-        dict_features["LIWC-inplace"].append(liwc_category_w_inplace)
-        # dict_features["concreteness"].append(concreteness_score_w_changed)
-        dict_features["concreteness-change"].append(concreteness_w_change)
-        dict_features["concreteness-inplace"].append(concreteness_w_inplace)
+        # dict_features["Levin"].append(levin_classes_w_original)
+        dict_features["Levin-original"].append(levin_classes_w_original)
+        dict_features["Levin-replacement"].append(levin_classes_w_replacement)
+        # dict_features["LIWC"].append(liwc_category_w_original)
+        dict_features["LIWC-original"].append(liwc_category_w_original)
+        dict_features["LIWC-replacement"].append(liwc_category_w_replacement)
+        # dict_features["concreteness"].append(concreteness_score_w_original)
+        dict_features["concreteness-original"].append(concreteness_w_original)
+        dict_features["concreteness-replacement"].append(concreteness_w_replacement)
         dict_features["cosine-sim"].append(cosine_sim)
 
         # TODO: predict when CLIP result is pos or neg? - I think we want to learn when CLIP fails
         dict_features["label"].append(int(clip_prediction != "pos"))
         dict_features["clip-score-diff"].append(clip_score_diff)
 
-    levin_liwc = [item for sublist in dict_features["Levin-change"] + dict_features["Levin-inplace"] +
-                  dict_features["LIWC-change"] + dict_features["LIWC-inplace"] for item in sublist]
+    levin_liwc = [item for sublist in dict_features["Levin-original"] + dict_features["Levin-replacement"] +
+                  dict_features["LIWC-original"] + dict_features["LIWC-replacement"] for item in sublist]
     features_count = (levin_liwc + ["POS-" + v for v in dict_features["POS"]] +
                       ["cosine-sim"] * len(dict_features["cosine-sim"]) +
-                      ["concreteness-change"] * len(dict_features["concreteness-change"]) +
-                      ["concreteness-inplace"] * len(dict_features["concreteness-inplace"]))
+                      ["concreteness-original"] * len(dict_features["concreteness-original"]) +
+                      ["concreteness-replacement"] * len(dict_features["concreteness-replacement"]))
     df = pd.DataFrame.from_dict(dict_features)
     return df, features_count
 
 
-def pre_process_features(one_hot_pos: np.ndarray, one_hot_levin_w_change: np.ndarray,
-                         one_hot_levin_w_inplace: np.ndarray, one_hot_liwc_change: np.ndarray,
-                         one_hot_liwc_inplace: np.ndarray, concreteness_w_change: np.ndarray,
-                         concreteness_w_inplace: np.ndarray, cosine_sim: np.ndarray,
-                         feat_categorical_names: Sequence[str],
+def pre_process_features(one_hot_pos: np.ndarray, one_hot_levin: np.ndarray, one_hot_liwc: np.ndarray,
+                         concreteness_diff: np.ndarray, cosine_sim: np.ndarray, feat_categorical_names: Sequence[str],
                          feat_continuous_names: Sequence[str]) -> Tuple[np.ndarray, Sequence[str]]:
-    feat_categorical = np.concatenate((one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
-                                       one_hot_liwc_change, one_hot_liwc_inplace), axis=1)
+    feat_categorical = np.concatenate((one_hot_pos, one_hot_levin, one_hot_liwc), axis=1)
     print(f"categorical feature size: {feat_categorical.shape}")
 
-    feat_continuous = np.concatenate((concreteness_w_change, concreteness_w_inplace, cosine_sim), axis=1)
-    scaler = preprocessing.StandardScaler()
-    scaler.fit(feat_continuous)  # standardize continuous features
-    feat_continuous_scaled = scaler.transform(feat_continuous)
+    feat_continuous = np.concatenate((concreteness_diff, cosine_sim), axis=1)
+    feat_continuous_scaled = preprocessing.StandardScaler().fit_transform(feat_continuous)
     print(f"continuous feature scaled size: {feat_continuous_scaled.shape}")
 
     # concatenate categorical (one hot) with scaled continuous features
@@ -494,12 +496,12 @@ def merge_csvs_and_filter_data(probes_path: str = "data/svo_probes.csv", neg_pat
                                output_path: str = "data/merged.csv") -> None:
     df_probes = pd.read_csv(probes_path, index_col="index")
 
-    df_probes.drop(df_probes.index[df_probes["sentence"] == "woman, ball, outside"], inplace=True)
-    df_probes.drop(df_probes.index[df_probes["sentence"] == "woman, music, notes"], inplace=True)
+    df_probes.drop(df_probes.index[df_probes["sentence"] == "woman, ball, outside"], replacement=True)
+    df_probes.drop(df_probes.index[df_probes["sentence"] == "woman, music, notes"], replacement=True)
 
     df_neg = pd.read_csv(neg_path, header=0)
-    df_neg.drop(df_neg.index[df_neg["neg_sentence"] == "woman, ball, outside"], inplace=True)
-    df_neg.drop(df_neg.index[df_neg["neg_sentence"] == "woman, music, notes"], inplace=True)
+    df_neg.drop(df_neg.index[df_neg["neg_sentence"] == "woman, ball, outside"], replacement=True)
+    df_neg.drop(df_neg.index[df_neg["neg_sentence"] == "woman, music, notes"], replacement=True)
 
     result = pd.concat([df_probes, df_neg["neg_sentence"]], axis=1)
     result = result[result["sentence"].notna()]
@@ -518,17 +520,15 @@ def process_features(clip_results: Sequence[Instance],
                      max_feature_count: Optional[int] = None) -> Tuple[np.ndarray, Sequence[str], Sequence[int],
                                                                        np.ndarray]:
     df, features_count = get_features(clip_results, max_feature_count=max_feature_count)
-    labels = df["label"].to_numpy()
+    # labels = df["label"].to_numpy()
+    labels = df["clip-score-diff"].to_numpy()
 
-    (one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace, one_hot_liwc_change, one_hot_liwc_inplace,
-     concreteness_w_change, concreteness_w_inplace, cosine_sim, feat_categorical_names, feat_continuous_names) = \
-        transform_features(df)
+    (one_hot_pos, one_hot_levin, one_hot_liwc, concreteness_diff, cosine_sim, feat_categorical_names,
+     feat_continuous_names) = transform_features(df)
 
     # categorical feature selection, standardize (scale) continuous features and concatenate categorical & continuous
-    features, feature_names = pre_process_features(one_hot_pos, one_hot_levin_w_change, one_hot_levin_w_inplace,
-                                                   one_hot_liwc_change, one_hot_liwc_inplace, concreteness_w_change,
-                                                   concreteness_w_inplace, cosine_sim, feat_categorical_names,
-                                                   feat_continuous_names)
+    features, feature_names = pre_process_features(one_hot_pos, one_hot_levin, one_hot_liwc, concreteness_diff,
+                                                   cosine_sim, feat_categorical_names, feat_continuous_names)
 
     print_metrics(df, feature_names, features)
     return features, feature_names, features_count, labels
@@ -572,23 +572,34 @@ def analyse_coef_weights(features: np.ndarray, labels: np.ndarray,
     return coef_weights, coef_significance, coef_sign
 
 
+def compute_ols_summary(features: np.ndarray, feature_names: Sequence[str], labels: np.ndarray) -> None:
+    df_features = pd.DataFrame(features, columns=feature_names)
+
+    df_features = df_features.drop(["POS_o", "POS_s", "POS_v"], axis="columns")
+    df_features = sm.add_constant(df_features)
+
+    print(sm.OLS(labels, df_features).fit().summary())
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--iterations", type=int, default=10_000)
+    # parser.add_argument("--iterations", type=int, default=10_000)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
-    # merge_csvs_and_filter_data()
-
+    # # merge_csvs_and_filter_data()
+    #
     clip_results = read_data()
     features, feature_names, features_count, labels = process_features(clip_results,
                                                                        max_feature_count=1000 if args.debug else None)
-    coef_weights, coef_significance, coef_sign = analyse_coef_weights(features, labels, args.iterations)
-    print_sorted_coef_weights(coef_weights, coef_significance, coef_sign, feature_names, features_count)
+    # coef_weights, coef_significance, coef_sign = analyse_coef_weights(features, labels, args.iterations)
+    compute_ols_summary(features, feature_names, labels)
+
+    # print_sorted_coef_weights(coef_weights, coef_significance, coef_sign, feature_names, features_count)
 
     # plot_coef_weights(coef_weights, feature_names)
 
