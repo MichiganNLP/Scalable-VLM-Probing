@@ -123,16 +123,16 @@ def parse_concreteness_file(path: str = "data/concreteness.txt") -> Mapping[str,
 
 
 def get_levin_category(word: str, dict_levin_semantic: Mapping[str, Container[str]]) -> Sequence[str]:
-    return [key
-            for key, category in dict_levin_semantic.items()
-            if word in category]
+    return [category
+            for category, category_words in dict_levin_semantic.items()
+            if word in category_words]
 
 
 def get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Sequence[str]:
-    return [category_word
-            for key, category_words in dict_liwc.items()
-            if key == word or (key[-1] == "*" and key[:-1] in word)
-            for category_word in category_words]
+    return [category
+            for key_word, categories in dict_liwc.items()
+            if key_word == word or (key_word[-1] == "*" and key_word[:-1] in word)
+            for category in categories]
 
 
 def get_wup_similarity(word_original: str, word_replacement: str, pos: str) -> float:
@@ -281,16 +281,16 @@ def transform_features(df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.nda
     df_concat = pd.concat([df["Levin-original"], df["Levin-replacement"]])
     one_hot_levin = binarizer.fit_transform(df_concat)
     one_hot_levin_original, one_hot_levin_replacement = np.split(one_hot_levin, 2)
-    one_hot_levin_change = one_hot_levin_original + one_hot_levin_replacement
-    one_hot_levin_change[one_hot_levin_change == 2] = 0  # only represent change
+    one_hot_levin_change = one_hot_levin_original - one_hot_levin_replacement
+    # one_hot_levin_change[one_hot_levin_change == 2] = 0  # only represent change
     levin_classes = binarizer.classes_.tolist()
 
     binarizer = MultiLabelBinarizer()
     df_concat = pd.concat([df["LIWC-original"], df["LIWC-replacement"]])
     one_hot_liwc = binarizer.fit_transform(df_concat)
     one_hot_liwc_original, one_hot_liwc_replacement = np.split(one_hot_liwc, 2)
-    one_hot_liwc_change = one_hot_liwc_original + one_hot_liwc_replacement
-    one_hot_liwc_change[one_hot_liwc_change == 2] = 0  # only represent change
+    one_hot_liwc_change = one_hot_liwc_original - one_hot_liwc_replacement
+    # one_hot_liwc_change[one_hot_liwc_change == 2] = 0  # only represent change
     liwc_classes = binarizer.classes_.tolist()
 
     concreteness_w_original = df["concreteness-original"].to_numpy()
