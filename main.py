@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import ast
+import itertools
 import json
 import string
 from collections import Counter, defaultdict
@@ -24,7 +25,6 @@ from tqdm.auto import tqdm
 
 NegType = Literal["s", "v", "o"]
 Triplet = Tuple[str, str, str]
-Instance = Tuple[int, str, str, Triplet, Triplet, str, bool, float]
 
 text_model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -39,54 +39,54 @@ def parse_triplets(triplets: str) -> Sequence[Triplet]:
         return [triplets.split(",")]  # noqa
 
 
-def get_sentence_match_triplet(triplets: Sequence[Triplet], sentence: str) -> Triplet:
-    if "people" in sentence.split():
-        triplets = [(s.replace("person", "people"), v.replace("person", "people"), o.replace("person", "people"))
-                    for s, v, o in triplets]
+def lemmatize(word: str) -> str:
+    return "person" if word == "people" else lemmatizer.lemmatize(word)
 
+
+def stem(word: str) -> str:
+    return stemmer.stem(word, to_lowercase=False)
+
+
+def get_sentence_match_triplet(triplets: Sequence[Triplet], sentence: str) -> Triplet:
     if len(triplets) == 1:
         return triplets[0]
     else:
-        words_sentence = sentence.split()
-        lemmatized_words_sentence = [lemmatizer.lemmatize(word) for word in sentence.split()]
-        stemmed_words_sentence = [stemmer.stem(word) for word in sentence.split()]
-        all_words = set(words_sentence + lemmatized_words_sentence + stemmed_words_sentence)
-        for triplet in triplets:
-            if triplet[0] in all_words and triplet[1] in all_words and triplet[2] in all_words:
-                return triplet
-
-    return triplets[0]
+        words = sentence.split()
+        lemmatized_words = (lemmatize(word) for word in words)
+        stemmed_words = (stem(word) for word in words)
+        all_words = set(itertools.chain(words, lemmatized_words, stemmed_words))
+        return next((triplet for triplet in triplets if set(triplet) <= all_words), triplets[0])
 
 
 def preprocess_sentences(sentences: pd.Series) -> pd.Series:
     return sentences.str.lower().str.translate(str.maketrans("", "", string.punctuation))
 
 
-def read_data(path: str) -> Sequence[Instance]:
-    df = pd.read_csv(path, index_col=0, usecols=["Unnamed: 0", "sentence", "neg_sentence", "pos_triplet", "neg_triplet",
-                                                 "neg_type", "clip prediction", "clip_score_diff"]).sort_index()
+def load_clip_results(path: str) -> pd.DataFrame:
+    df = pd.read_csv(path, index_col="Unnamed: 0", usecols=["Unnamed: 0", "sentence", "neg_sentence", "pos_triplet",
+                                                            "neg_triplet", "neg_type", "clip prediction",
+                                                            "clip_score_diff"]).sort_index()
 
     df.sentence = preprocess_sentences(df.sentence)
     df.neg_sentence = preprocess_sentences(df.neg_sentence)
 
-    results = []
-    for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction, clip_score_diff in \
-            zip(df.index, df["sentence"], df["neg_sentence"], df["pos_triplet"], df["neg_triplet"], df["neg_type"],
-                df["clip prediction"], df["clip_score_diff"]):
+    df.pos_triplet = df.pos_triplet.apply(parse_triplets)
+    df.neg_triplet = df.neg_triplet.apply(parse_triplets)
 
-        parsed_pos_triplet = parse_triplets(pos_triplet)
-        parsed_neg_triplet = parse_triplets(neg_triplet)
-        if not parsed_pos_triplet or not parsed_neg_triplet or not sentence:
-            continue
+    df = df[((df.pos_triplet.str.len() > 0)  # The triplets are list, but we can use this `str` function.
+             & (df.neg_triplet.str.len() > 0)
+             & (df.sentence.str.len() > 0)
+             & (df.neg_sentence.str.len() > 0))]
 
-        match_pos_triplet = get_sentence_match_triplet(parsed_pos_triplet, sentence)
-        match_neg_triplet = get_sentence_match_triplet(parsed_neg_triplet, neg_sentence)
+    df.pos_triplet = df.apply(lambda row: get_sentence_match_triplet(row.pos_triplet, row.sentence), axis=1)
+    df.neg_triplet = df.apply(lambda row: get_sentence_match_triplet(row.neg_triplet, row.neg_sentence), axis=1)
 
-        results.append(
-            (index, sentence, neg_sentence, match_pos_triplet, match_neg_triplet, neg_type[0], clip_prediction,
-             clip_score_diff))
+    df.neg_type = df.neg_type.str.get(0)
+    assert df.neg_type.isin(get_args(NegType)).all()
 
-    return results
+    df["clip prediction"] = df["clip prediction"] == "pos"
+
+    return df
 
 
 def parse_liwc_file(path: str = "data/LIWC.2015.all.txt") -> Tuple[Mapping[str, Sequence[str]], Set[str]]:
@@ -123,8 +123,12 @@ def get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Sequ
             for category in categories]
 
 
-def get_wup_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
-    pos = "v" if neg_type == "v" else "n"
+def neg_type_to_pos(neg_type: NegType) -> Literal["n", "v"]:
+    return "v" if neg_type == "v" else "n"  # noqa
+
+
+def compute_wup_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
+    pos = neg_type_to_pos(neg_type)
     return max((synset_original.wup_similarity(synset_replacement)
                 for synset_original in wordnet.synsets(word_original, pos=pos)
                 for synset_replacement in wordnet.synsets(word_replacement, pos=pos)),
@@ -197,7 +201,7 @@ def _fix_one_hot_encoder_columns(df: pd.DataFrame, mapper: DataFrameMapper) -> p
     return df
 
 
-def transform_features(df: pd.DataFrame, merge_original_and_replacement: bool = True) -> pd.DataFrame:
+def transform_features_to_numbers(df: pd.DataFrame, merge_original_and_replacement: bool = True) -> pd.DataFrame:
     df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
 
     mapper = DataFrameMapper([
@@ -240,8 +244,8 @@ def get_original_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: NegT
         raise ValueError(f"Wrong neg_type: {neg_type}, needs to be one from {get_args(NegType)}")
 
 
-def get_features(clip_results: Sequence[Instance],
-                 max_feature_count: Optional[int] = None) -> Tuple[pd.DataFrame, Sequence[int]]:
+def compute_features(clip_results: pd.DataFrame,
+                     max_feature_count: Optional[int] = None) -> Tuple[pd.DataFrame, Sequence[int]]:
     if max_feature_count:
         clip_results = clip_results[:max_feature_count]
 
@@ -255,15 +259,14 @@ def get_features(clip_results: Sequence[Instance],
     dict_liwc, _ = parse_liwc_file()
     dict_concreteness = parse_concreteness_file()
 
-    sentences = [x[1] for x in clip_results]
-    negative_sentences = [x[2] for x in clip_results]
+    sentences = clip_results.sentence.array
+    negative_sentences = clip_results.neg_sentence.array
 
-    dict_features["index"] = [x[0] for x in clip_results]
     dict_features["sent"] = sentences
     dict_features["n_sent"] = negative_sentences
 
-    dict_features["label"] = [int(x[-2] == "pos") for x in clip_results]
-    dict_features["clip-score-diff"] = [x[-1] for x in clip_results]
+    dict_features["label"] = clip_results["clip prediction"]
+    dict_features["clip-score-diff"] = clip_results.clip_score_diff
 
     embedded_sentences = text_model.encode(sentences, show_progress_bar=True)
     embedded_neg_sentences = text_model.encode(negative_sentences, show_progress_bar=True)
@@ -272,14 +275,13 @@ def get_features(clip_results: Sequence[Instance],
     # We set the similarity to NaN for empty sentences:
     dict_features["text_similarity"][[s == "" for s in negative_sentences]] = float("nan")
 
-    for _, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, _, _ in tqdm(
-            clip_results, desc="Computing the features"):
-        word_original, word_replacement = get_original_word(pos_triplet, neg_triplet, neg_type)
+    for _, row in tqdm(clip_results.iterrows(), desc="Computing the features", total=len(clip_results)):
+        word_original, word_replacement = get_original_word(row.pos_triplet, row.neg_triplet, row.neg_type)
 
         if not word_replacement or not word_original:
             raise ValueError(f"Found empty word original or word replacement")
 
-        if neg_type == "v":
+        if row.neg_type == "v":
             levin_classes_w_original = get_levin_category(word_original, levin_semantic_broad)  # TODO: other Levin?
             levin_classes_w_replacement = get_levin_category(word_replacement, levin_semantic_broad)
         else:
@@ -291,11 +293,11 @@ def get_features(clip_results: Sequence[Instance],
         concreteness_w_original = get_concreteness_score(word_original, dict_concreteness)
         concreteness_w_replacement = get_concreteness_score(word_replacement, dict_concreteness)
 
-        wup_similarity = get_wup_similarity(word_original, word_replacement, neg_type=neg_type)
+        wup_similarity = compute_wup_similarity(word_original, word_replacement, neg_type=row.neg_type)
 
         dict_features["word_original"].append(word_original)
         dict_features["word_replacement"].append(word_replacement)
-        dict_features["neg_type"].append(neg_type)
+        dict_features["neg_type"].append(row.neg_type)
         dict_features["Levin-original"].append(levin_classes_w_original)
         dict_features["Levin-replacement"].append(levin_classes_w_replacement)
         dict_features["LIWC-original"].append(liwc_category_w_original)
@@ -317,8 +319,8 @@ def get_features(clip_results: Sequence[Instance],
                       ["wup_similarity"] * len(dict_features["wup_similarity"]) +
                       ["concreteness-original"] * len(dict_features["concreteness-original"]) +
                       ["concreteness-replacement"] * len(dict_features["concreteness-replacement"]))
-    df = pd.DataFrame.from_dict(dict_features)
-    return df, features_count
+
+    return pd.DataFrame.from_dict(dict_features), features_count
 
 
 def plot_coef_weights(coef_weights: np.ndarray, feature_names: Sequence[str],
@@ -385,17 +387,13 @@ def print_metrics(df: pd.DataFrame, feature_names: Sequence[str], features: np.n
     print(f"LIWC total number of classes: {len(liwc_categories)}")
 
 
-def process_features(clip_results: Sequence[Instance],
-                     max_feature_count: Optional[int] = None,
-                     feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, Sequence[int], np.ndarray]:
-    df, features_count = get_features(clip_results, max_feature_count=max_feature_count)
-
-    features = transform_features(df)
-
+def compute_numeric_features(clip_results: pd.DataFrame, max_feature_count: Optional[int] = None,
+                             feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, Sequence[int], np.ndarray]:
+    raw_features, features_count = compute_features(clip_results, max_feature_count=max_feature_count)
+    features = transform_features_to_numbers(raw_features)
     features = features.loc[:, ((features != 0).sum(0) >= feature_min_non_zero_values)]
-
-    # print_metrics(df, feature_names, features)
-    return features, features_count, df["clip-score-diff"]
+    # print_metrics(features, feature_names, features)
+    return features, features_count, raw_features["clip-score-diff"]
 
 
 def build_classifier() -> svm.LinearSVC:
@@ -464,8 +462,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    clip_results = read_data("data/merged.csv")
-    features, features_count, labels = process_features(clip_results, max_feature_count=1000 if args.debug else None)
+    clip_results = load_clip_results("data/merged.csv")
+    features, features_count, labels = compute_numeric_features(clip_results,
+                                                                max_feature_count=1000 if args.debug else None)
     # coef_weights, coef_significance, coef_sign = analyse_coef_weights(features, labels, args.iterations)
     compute_ols_summary(features, labels)
 
