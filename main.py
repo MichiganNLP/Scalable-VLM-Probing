@@ -58,29 +58,21 @@ def get_sentence_match_triplet(triplets: Sequence[Triplet], sentence: str) -> Tr
     return triplets[0]
 
 
-def pre_process_sentences(sentence: str) -> str:
-    if type(sentence) == str:
-        sentence = sentence.lower()
-        sentence = sentence.translate(str.maketrans("", "", string.punctuation))
-    else:
-        sentence = ""
-    return sentence
+def preprocess_sentences(sentences: pd.Series) -> pd.Series:
+    return sentences.str.lower().str.translate(str.maketrans("", "", string.punctuation))
 
 
 def read_data(path: str) -> Sequence[Instance]:
     df = pd.read_csv(path, index_col=0, usecols=["Unnamed: 0", "sentence", "neg_sentence", "pos_triplet", "neg_triplet",
                                                  "neg_type", "clip prediction", "clip_score_diff"]).sort_index()
 
-    # df.sentence = df.sentence.apply(pre_process_sentences)
-    # df.neg_sentence = df.neg_sentence.apply(pre_process_sentences)
+    df.sentence = preprocess_sentences(df.sentence)
+    df.neg_sentence = preprocess_sentences(df.neg_sentence)
 
     results = []
     for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction, clip_score_diff in \
             zip(df.index, df["sentence"], df["neg_sentence"], df["pos_triplet"], df["neg_triplet"], df["neg_type"],
                 df["clip prediction"], df["clip_score_diff"]):
-
-        sentence = pre_process_sentences(sentence)
-        neg_sentence = pre_process_sentences(neg_sentence)
 
         parsed_pos_triplet = parse_triplets(pos_triplet)
         parsed_neg_triplet = parse_triplets(neg_triplet)
