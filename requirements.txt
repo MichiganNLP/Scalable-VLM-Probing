@@ -4,6 +4,7 @@ nltk==3.7
 numpy==1.23.2
 pandas==1.4.4
 scikit-learn==1.1.2
+sentence-transformers==2.2.2
 sklearn-pandas==2.2.0
 statsmodels==0.13.5
 torch==1.12.1

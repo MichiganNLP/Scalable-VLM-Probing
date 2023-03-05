@@ -6,32 +6,27 @@ import string
 from collections import Counter, defaultdict
 from functools import partial
 from multiprocessing import Pool
-from typing import Container, List, Mapping, Optional, Sequence, Set, Tuple, Literal
+from typing import Container, List, Literal, Mapping, Optional, Sequence, Set, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
-import torch
 from nltk.corpus import wordnet
 from nltk.corpus.reader.wordnet import WordNetError
 from nltk.stem import PorterStemmer, WordNetLemmatizer
+from sentence_transformers import SentenceTransformer, util
 from sklearn import svm
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
-from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardScaler
 from sklearn_pandas import DataFrameMapper
 from tqdm.auto import tqdm
-from transformers import AutoModel, AutoTokenizer
-from word_forms.word_forms import get_word_forms
 
 Triplet = Tuple[str, str, str]
 Instance = Tuple[int, str, str, Triplet, Triplet, str, bool, float]
 
-model_name = "bert-base-uncased"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-text_model = AutoModel.from_pretrained(model_name)
+text_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 stemmer = PorterStemmer()
 lemmatizer = WordNetLemmatizer()
@@ -154,74 +149,6 @@ def get_wup_similarity(word_original: str, word_replacement: str, pos: Literal["
     return syn1.wup_similarity(syn2)
 
 
-def compute_embedding(word_type: str, sentence: str) -> np.ndarray:
-    if sentence:
-        inputs = tokenizer(sentence, return_tensors="pt")
-        map_word_token_idx = {x: tokenizer.encode(x, add_special_tokens=False) for x in sentence.split()}
-        stemmed_map_word_token_idx = {stemmer.stem(word): map_word_token_idx[word]
-                                      for word in map_word_token_idx.keys()}
-        token_ids = []
-        if word_type in stemmed_map_word_token_idx:
-            token_ids = stemmed_map_word_token_idx[word_type]
-        elif word_type in map_word_token_idx:
-            token_ids = map_word_token_idx[word_type]
-        else:
-            all_word_forms = get_word_forms(word_type)["v"]
-            for word in all_word_forms:
-                if word in map_word_token_idx:
-                    token_ids = map_word_token_idx[word]
-                    break
-        if token_ids:
-            index_word = [inputs["input_ids"].tolist()[0].index(token_id) for token_id in token_ids]
-        else:  # treat as separate word / not part of a sentence
-            inputs = tokenizer(word_type, return_tensors="pt")
-            index_word = [1]
-    else:  # treat as separate word / not part of a sentence
-        inputs = tokenizer(word_type, return_tensors="pt")
-        index_word = [1]
-
-    with torch.inference_mode():
-        outputs = text_model(**inputs)
-
-    embedding_word = np.mean(outputs.last_hidden_state.detach().numpy()[0][index_word[0]:index_word[-1] + 1], axis=0)
-    return np.expand_dims(embedding_word, axis=0)
-
-
-def save_bert_embeddings(list_words: Sequence[str], path: str = "data/bert_embeddings.npy") -> None:
-    word_embeddings = {}
-    for word in list_words:
-        inputs = tokenizer(word, return_tensors="pt")
-        with torch.inference_mode():
-            outputs = text_model(**inputs)
-        embedding_word = outputs.last_hidden_state.detach().numpy()[0][1]
-        embedding_word = np.expand_dims(embedding_word, axis=0)
-        word_embeddings[word] = embedding_word
-
-    np.save(path, word_embeddings)
-
-
-def save_bert_embeddings_sentences(list_word_sentence: Sequence[Tuple[str, str]],
-                                   path: str = "data/bert_embeddings_sentences.npy") -> None:
-    dict_data = {}
-    for word, sentence in tqdm(list_word_sentence, desc="Computing BERT embeddings"):
-        dict_data[(word, sentence)] = compute_embedding(word, sentence)
-    np.save(path, dict_data)
-
-
-def get_cosine_similarity_sent(word_original: str, word_replacement: str, sentence: str, neg_sentence: str,
-                               bert_embeddings: Mapping[Tuple[str, str], np.ndarray]) -> float:
-    embedding_word_original = bert_embeddings[(word_original, sentence)]
-    embedding_word_replacement = bert_embeddings[(word_replacement, neg_sentence)]
-    return cosine_similarity(embedding_word_original, embedding_word_replacement)[0][0]
-
-
-def get_cosine_similarity(word_original: str, word_replacement: str,
-                          bert_embeddings: Mapping[str, np.ndarray]) -> float:
-    embedding_word_original = bert_embeddings[word_original]
-    embedding_word_replacement = bert_embeddings[word_replacement]
-    return cosine_similarity(embedding_word_original, embedding_word_replacement)[0][0]
-
-
 def get_concreteness_score(word: str, dict_concreteness: Mapping[str, float]) -> float:
     return dict_concreteness.get(word, float("nan"))
 
@@ -282,7 +209,7 @@ def transform_features(df: pd.DataFrame, merge_original_and_replacement: bool = 
         ("LIWC-original", MultiLabelBinarizer()),
         ("LIWC-replacement", MultiLabelBinarizer()),
         (["concreteness-change"], [SimpleImputer(), StandardScaler()]),
-        (["cosine-sim"], [SimpleImputer(), StandardScaler()]),
+        (["text_similarity"], [SimpleImputer(), StandardScaler()]),
         (["wup_similarity"], [SimpleImputer(), StandardScaler()]),
     ], df_out=True)
 
@@ -314,49 +241,33 @@ def get_original_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: str)
         raise ValueError(f"Wrong neg_type: {neg_type}, needs to be from s,v,o")
 
 
-def get_bert_data(clip_results: Sequence[Instance]) -> None:
-    list_word_sentence, set_words = [], set()
-    for _, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, _, _ in clip_results:
-        word_original, word_replacement = get_original_word(pos_triplet, neg_triplet, neg_type)
-        if not word_replacement or not word_original:
-            continue
-        if (word_original, sentence) not in list_word_sentence:
-            list_word_sentence.append((word_original, sentence))
-        if (word_replacement, neg_sentence) not in list_word_sentence:
-            list_word_sentence.append((word_replacement, neg_sentence))
-        set_words.add(word_replacement)
-        set_words.add(word_original)
-    print(len(list_word_sentence))
-    save_bert_embeddings_sentences(list_word_sentence)
-
-
-def get_features(clip_results: Sequence[Instance], bert_embeddings_path: str = "data/bert_embeddings.npy",  # noqa
+def get_features(clip_results: Sequence[Instance],
                  max_feature_count: Optional[int] = None) -> Tuple[pd.DataFrame, Sequence[int]]:
     dict_features = {"index": [], "sent": [], "n_sent": [], "word_original": [], "word_replacement": [], "POS": [],
                      "Levin-original": [], "Levin-replacement": [], "LIWC-original": [], "LIWC-replacement": [],
-                     "concreteness-original": [], "concreteness-replacement": [], "cosine-sim": [],
-                     "wup_similarity": [], "label": [], "clip-score-diff": []}
+                     "concreteness-original": [], "concreteness-replacement": [], "wup_similarity": [], "label": [],
+                     "clip-score-diff": []}
 
     levin_dict, _ = parse_levin_file()
     levin_semantic_broad, _, _ = parse_levin_dict(levin_dict)
     dict_liwc, _ = parse_liwc_file()
     dict_concreteness = parse_concreteness_file()
-    # bert_embeddings = np.load(path, allow_pickle=True).item()  # transform from ndarray to dict
 
     if max_feature_count:
         clip_results = clip_results[:max_feature_count]
+
+    embedded_sentences = text_model.encode([x[1] for x in clip_results], show_progress_bar=True)
+    embedded_neg_sentences = text_model.encode([x[2] for x in clip_results], show_progress_bar=True)
+
+    # TODO: can we save computation?
+    dict_features["text_similarity"] = util.cos_sim(embedded_sentences, embedded_neg_sentences).diag()
 
     for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction, clip_score_diff in tqdm(
             clip_results, desc="Computing the features"):
         word_original, word_replacement = get_original_word(pos_triplet, neg_triplet, neg_type)
 
         if not word_replacement or not word_original:
-            print(f"Found empty word original or word replacement in index {index} not processing data and continue…")
-            continue
-
-        cosine_sim = np.random.randn()  # TODO: fix the BERT embeddings file to have all words.
-        #                                  Also, use something that actually supports cosine similarity, such as S-BERT.
-        # cosine_sim = get_cosine_similarity(word_original, word_replacement, bert_embeddings)  # noqa
+            raise ValueError(f"Found empty word original or word replacement in index {index}")
 
         if neg_type == "v":
             levin_classes_w_original = get_levin_category(word_original, levin_semantic_broad)  # TODO: other Levin?
@@ -387,7 +298,6 @@ def get_features(clip_results: Sequence[Instance], bert_embeddings_path: str = "
         # dict_features["concreteness"].append(concreteness_score_w_original)
         dict_features["concreteness-original"].append(concreteness_w_original)
         dict_features["concreteness-replacement"].append(concreteness_w_replacement)
-        dict_features["cosine-sim"].append(cosine_sim)
         dict_features["wup_similarity"].append(wup_similarity)
 
         dict_features["label"].append(int(clip_prediction == "pos"))
@@ -396,7 +306,7 @@ def get_features(clip_results: Sequence[Instance], bert_embeddings_path: str = "
     levin_liwc = [item for sublist in dict_features["Levin-original"] + dict_features["Levin-replacement"] +
                   dict_features["LIWC-original"] + dict_features["LIWC-replacement"] for item in sublist]
     features_count = (levin_liwc + ["POS-" + v for v in dict_features["POS"]] +
-                      ["cosine-sim"] * len(dict_features["cosine-sim"]) +
+                      ["text_similarity"] * len(dict_features["text_similarity"]) +
                       ["concreteness-original"] * len(dict_features["concreteness-original"]) +
                       ["concreteness-replacement"] * len(dict_features["concreteness-replacement"]))
     df = pd.DataFrame.from_dict(dict_features)
