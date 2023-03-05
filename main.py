@@ -6,7 +6,7 @@ import string
 from collections import Counter, defaultdict
 from functools import partial
 from multiprocessing import Pool
-from typing import Container, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Container, List, Mapping, Optional, Sequence, Set, Tuple, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,8 +14,10 @@ import pandas as pd
 import statsmodels.api as sm
 import torch
 from nltk.corpus import wordnet
+from nltk.corpus.reader.wordnet import WordNetError
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from sklearn import svm
+from sklearn.impute import SimpleImputer
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardScaler
@@ -135,19 +137,19 @@ def get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Sequ
             for category in categories]
 
 
-def get_wup_similarity(word_original: str, word_replacement: str, pos: str) -> float:
+def get_wup_similarity(word_original: str, word_replacement: str, pos: Literal["s", "v", "o"]) -> float:
     if pos == "s" or pos == "o":
         pos = "n"  # TODO: it might have other types of words different from nouns.
 
     try:
-        syn1 = wordnet.synset(".".join([word_original, pos, "01"]))
-    except wordnet.WordNetError:
-        syn1 = wordnet.synsets(word_original)[0]
+        syn1 = wordnet.synset(f"{word_original}.{pos}.01")
+    except WordNetError:
+        return float("nan")
 
     try:
-        syn2 = wordnet.synset(".".join([word_replacement, pos, "01"]))
-    except wordnet.WordNetError:
-        syn2 = wordnet.synsets(word_replacement)[0]
+        syn2 = wordnet.synset(f"{word_replacement}.{pos}.01")
+    except WordNetError:
+        return float("nan")
 
     return syn1.wup_similarity(syn2)
 
@@ -221,7 +223,7 @@ def get_cosine_similarity(word_original: str, word_replacement: str,
 
 
 def get_concreteness_score(word: str, dict_concreteness: Mapping[str, float]) -> float:
-    return dict_concreteness.get(word, 3)  # 3 is the mean of all the scores, to not influence the results.
+    return dict_concreteness.get(word, float("nan"))
 
 
 def parse_levin_file(path: str = "data/levin_verbs.txt") -> Tuple[Mapping[str, Sequence[str]],
@@ -279,8 +281,9 @@ def transform_features(df: pd.DataFrame, merge_original_and_replacement: bool = 
         ("Levin-replacement", MultiLabelBinarizer()),
         ("LIWC-original", MultiLabelBinarizer()),
         ("LIWC-replacement", MultiLabelBinarizer()),
-        (["concreteness-change"], StandardScaler()),
-        (["cosine-sim"], StandardScaler()),
+        (["concreteness-change"], [SimpleImputer(), StandardScaler()]),
+        (["cosine-sim"], [SimpleImputer(), StandardScaler()]),
+        (["wup_similarity"], [SimpleImputer(), StandardScaler()]),
     ], df_out=True)
 
     new_df = mapper.fit_transform(df)
@@ -331,8 +334,8 @@ def get_features(clip_results: Sequence[Instance], bert_embeddings_path: str = "
                  max_feature_count: Optional[int] = None) -> Tuple[pd.DataFrame, Sequence[int]]:
     dict_features = {"index": [], "sent": [], "n_sent": [], "word_original": [], "word_replacement": [], "POS": [],
                      "Levin-original": [], "Levin-replacement": [], "LIWC-original": [], "LIWC-replacement": [],
-                     "concreteness-original": [], "concreteness-replacement": [], "cosine-sim": [], "label": [],
-                     "clip-score-diff": []}
+                     "concreteness-original": [], "concreteness-replacement": [], "cosine-sim": [],
+                     "wup_similarity": [], "label": [], "clip-score-diff": []}
 
     levin_dict, _ = parse_levin_file()
     levin_semantic_broad, _, _ = parse_levin_dict(levin_dict)
@@ -367,6 +370,8 @@ def get_features(clip_results: Sequence[Instance], bert_embeddings_path: str = "
         concreteness_w_original = get_concreteness_score(word_original, dict_concreteness)
         concreteness_w_replacement = get_concreteness_score(word_replacement, dict_concreteness)
 
+        wup_similarity = get_wup_similarity(word_original, word_replacement, pos=neg_type)
+
         dict_features["index"].append(index)
         dict_features["sent"].append(sentence)
         dict_features["n_sent"].append(neg_sentence)
@@ -383,6 +388,7 @@ def get_features(clip_results: Sequence[Instance], bert_embeddings_path: str = "
         dict_features["concreteness-original"].append(concreteness_w_original)
         dict_features["concreteness-replacement"].append(concreteness_w_replacement)
         dict_features["cosine-sim"].append(cosine_sim)
+        dict_features["wup_similarity"].append(wup_similarity)
 
         dict_features["label"].append(int(clip_prediction == "pos"))
         dict_features["clip-score-diff"].append(clip_score_diff)
