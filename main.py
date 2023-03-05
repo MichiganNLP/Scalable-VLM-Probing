@@ -213,7 +213,7 @@ def transform_features_to_numbers(df: pd.DataFrame, merge_original_and_replaceme
         (["concreteness-change"], [SimpleImputer(), StandardScaler()]),
         (["text_similarity"], [SimpleImputer(), StandardScaler()]),
         (["word_similarity"], [SimpleImputer(), StandardScaler()]),
-        (["wup_similarity"], [SimpleImputer(), StandardScaler()]),
+        # (["wup_similarity"], [SimpleImputer(), StandardScaler()]),
     ], df_out=True)
 
     new_df = mapper.fit_transform(df)
@@ -293,7 +293,8 @@ def compute_features(clip_results: pd.DataFrame,
         concreteness_w_original = get_concreteness_score(word_original, dict_concreteness)
         concreteness_w_replacement = get_concreteness_score(word_replacement, dict_concreteness)
 
-        wup_similarity = compute_wup_similarity(word_original, word_replacement, neg_type=row.neg_type)
+        # wup_similarity = compute_wup_similarity(word_original, word_replacement, neg_type=row.neg_type)
+        wup_similarity = float("nan")
 
         dict_features["word_original"].append(word_original)
         dict_features["word_replacement"].append(word_replacement)
