@@ -269,8 +269,9 @@ def get_features(clip_results: Sequence[Instance],
     embedded_sentences = text_model.encode(sentences, show_progress_bar=True)
     embedded_neg_sentences = text_model.encode(negative_sentences, show_progress_bar=True)
 
-    # TODO: can we save computation?
-    dict_features["text_similarity"] = util.cos_sim(embedded_sentences, embedded_neg_sentences).diag()
+    dict_features["text_similarity"] = util.pairwise_cos_sim(embedded_sentences, embedded_neg_sentences)
+    # We set the similarity to NaN for empty sentences:
+    dict_features["text_similarity"][[s == "" for s in negative_sentences]] = float("nan")
 
     for _, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, _, _ in tqdm(
             clip_results, desc="Computing the features"):
@@ -307,8 +308,7 @@ def get_features(clip_results: Sequence[Instance],
     embedded_original_words = text_model.encode(dict_features["word_original"], show_progress_bar=True)
     embedded_replacement_words = text_model.encode(dict_features["word_replacement"], show_progress_bar=True)
 
-    # TODO: can we save computation?
-    dict_features["word_similarity"] = util.cos_sim(embedded_original_words, embedded_replacement_words).diag()
+    dict_features["word_similarity"] = util.pairwise_cos_sim(embedded_original_words, embedded_replacement_words)
 
     levin_liwc = [item for sublist in dict_features["Levin-original"] + dict_features["Levin-replacement"] +
                   dict_features["LIWC-original"] + dict_features["LIWC-replacement"] for item in sublist]
