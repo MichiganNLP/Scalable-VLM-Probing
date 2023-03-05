@@ -313,8 +313,7 @@ def get_features(clip_results: Sequence[Instance],
 
 
 def plot_coef_weights(coef_weights: np.ndarray, feature_names: Sequence[str],
-                      path: str = "data/coef_importance.png") -> None:
-    top_features = 5
+                      path: str = "data/coef_importance.png", top_features: int = 5) -> None:
     coef = coef_weights.ravel()  # flatten array
     top_positive_coefficients = np.argsort(coef)[-top_features:]
     top_negative_coefficients = np.argsort(coef)[:top_features]
