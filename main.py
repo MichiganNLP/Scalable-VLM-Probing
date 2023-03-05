@@ -198,7 +198,7 @@ def _fix_one_hot_encoder_columns(df: pd.DataFrame, mapper: DataFrameMapper) -> p
             if "alias" in kwargs:
                 old_name_prefix = kwargs.get("alias")
             elif isinstance(columns, list):
-                old_name_prefix = '_'.join(str(c) for c in columns)
+                old_name_prefix = "_".join(str(c) for c in columns)
             else:
                 old_name_prefix = columns
 
