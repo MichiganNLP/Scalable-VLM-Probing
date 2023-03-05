@@ -2,7 +2,9 @@
 
 Probing CLIP on SVO-Probes.
 
-## Setup:
+## Setup
+
+With Python >= 3.8, run the following commands:
 
 ```bash
 pip install -r requirements.txt
