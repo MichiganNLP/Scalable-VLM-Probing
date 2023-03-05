@@ -371,23 +371,6 @@ def print_metrics(df: pd.DataFrame, feature_names: Sequence[str], features: np.n
     print(f"LIWC total number of classes: {len(liwc_categories)}")
 
 
-def merge_csvs_and_filter_data(probes_path: str = "data/svo_probes.csv", neg_path: str = "data/neg_d.csv",
-                               output_path: str = "data/merged.csv") -> None:
-    df_probes = pd.read_csv(probes_path, index_col="index")
-
-    df_probes.drop(df_probes.index[df_probes["sentence"] == "woman, ball, outside"], replacement=True)
-    df_probes.drop(df_probes.index[df_probes["sentence"] == "woman, music, notes"], replacement=True)
-
-    df_neg = pd.read_csv(neg_path, header=0)
-    df_neg.drop(df_neg.index[df_neg["neg_sentence"] == "woman, ball, outside"], replacement=True)
-    df_neg.drop(df_neg.index[df_neg["neg_sentence"] == "woman, music, notes"], replacement=True)
-
-    result = pd.concat([df_probes, df_neg["neg_sentence"]], axis=1)
-    result = result[result["sentence"].notna()]
-
-    result.to_csv(output_path)
-
-
 def process_features(clip_results: Sequence[Instance],
                      max_feature_count: Optional[int] = None,
                      feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, Sequence[int], np.ndarray]:
