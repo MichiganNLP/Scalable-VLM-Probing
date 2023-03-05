@@ -101,7 +101,7 @@ def parse_liwc_file(path: str = "data/LIWC.2015.all.txt") -> Tuple[Mapping[str, 
     liwc_categories = set()
     with open(path) as file:
         for line in file:
-            word, category = [w.strip() for w in line.strip().split(",")]
+            word, category = (w.strip() for w in line.strip().split(","))
             dict_liwc[word].append(category)
             liwc_categories.add(category)
     return dict_liwc, liwc_categories
