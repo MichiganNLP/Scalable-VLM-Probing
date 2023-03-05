@@ -372,19 +372,19 @@ def evaluate(method_name: str, labels_test: np.ndarray, predicted: Sequence[int]
 
 def print_metrics(df: pd.DataFrame, feature_names: Sequence[str], features: np.ndarray) -> None:
     main_feature_names = [feature_name.split("_")[0] for feature_name in feature_names]
-    print(f"Counter all labels: {Counter(df['label'].tolist())}")
-    print(f"Data size: {len(df['index'].tolist())}")
-    print(f"Features size: {len(feature_names)}, {Counter(main_feature_names)}")
-    print(f"Features shape: {features.shape}")
+    print(f"Counter all labels:", Counter(df["label"].tolist()))
+    print(f"Data size:", len(df["index"].tolist()))
+    print(f"Features size:", len(feature_names), "--", Counter(main_feature_names))
+    print(f"Features shape:", features.shape)
 
     levin_dict, compressed_levin_dict = parse_levin_file()
     levin_semantic_broad, levin_semantic_all, levin_alternations = parse_levin_dict(levin_dict)
-    print(f"--Levin semantic_broad nb classes: {len(levin_semantic_broad.keys())}")
-    print(f"--Levin semantic_all nb classes: {len(levin_semantic_all.keys())}")
-    print(f"--Levin alternations nb classes: {len(levin_alternations.keys())}")
+    print(f"--Levin semantic_broad nb classes:", len(levin_semantic_broad.keys()))
+    print(f"--Levin semantic_all nb classes:", len(levin_semantic_all.keys()))
+    print(f"--Levin alternations nb classes:", len(levin_alternations.keys()))
 
     liwc_dict, liwc_categories = parse_liwc_file()
-    print(f"LIWC total number of classes: {len(liwc_categories)}")
+    print(f"LIWC total number of classes:", len(liwc_categories))
 
 
 def compute_numeric_features(clip_results: pd.DataFrame, max_feature_count: Optional[int] = None,
