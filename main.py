@@ -6,7 +6,7 @@ import string
 from collections import Counter, defaultdict
 from functools import partial
 from multiprocessing import Pool
-from typing import Any, Container, Dict, List, Literal, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Container, Dict, Literal, Mapping, Optional, Sequence, Set, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -36,10 +36,6 @@ def parse_triplets(triplets: str) -> Sequence[Triplet]:
         return [triplet.split(",") for triplet in ast.literal_eval(triplets)]
     else:
         return [triplets.split(",")]  # noqa
-
-
-def get_first_triplet(triplets: Sequence[Triplet]) -> Triplet:
-    return next(iter(triplets), ("", "", ""))
 
 
 def get_sentence_match_triplet(triplets: Sequence[Triplet], sentence: str) -> Triplet:
@@ -391,12 +387,6 @@ def merge_csvs_and_filter_data(probes_path: str = "data/svo_probes.csv", neg_pat
     result = result[result["sentence"].notna()]
 
     result.to_csv(output_path)
-
-
-def delete_multiple_element(list_object: List[int], indices: Sequence[int]) -> None:
-    for i in sorted(indices, reverse=True):
-        if i < len(list_object):
-            list_object.pop(i)
 
 
 def process_features(clip_results: Sequence[Instance],
