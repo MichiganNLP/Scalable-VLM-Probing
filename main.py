@@ -6,7 +6,7 @@ import string
 from collections import Counter, defaultdict
 from functools import partial
 from multiprocessing import Pool
-from typing import Container, List, Literal, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Container, Dict, List, Literal, Mapping, Optional, Sequence, Set, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -74,10 +74,9 @@ def pre_process_sentences(sentence: str) -> str:
 def read_data(path: str = "data/merged.csv") -> Sequence[Instance]:
     df = pd.read_csv(path, index_col=0)
     df = df.sort_index()
-    df["index"] = df.index
     results = []
     for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction, clip_score_diff in \
-            zip(df["index"], df["sentence"], df["neg_sentence"], df["pos_triplet"], df["neg_triplet"], df["neg_type"],
+            zip(df.index, df["sentence"], df["neg_sentence"], df["pos_triplet"], df["neg_triplet"], df["neg_type"],
                 df["clip prediction"], df["clip_score_diff"]):
 
         sentence = pre_process_sentences(sentence)  # remove punctuation
@@ -210,6 +209,7 @@ def transform_features(df: pd.DataFrame, merge_original_and_replacement: bool = 
         ("LIWC-replacement", MultiLabelBinarizer()),
         (["concreteness-change"], [SimpleImputer(), StandardScaler()]),
         (["text_similarity"], [SimpleImputer(), StandardScaler()]),
+        (["word_similarity"], [SimpleImputer(), StandardScaler()]),
         (["wup_similarity"], [SimpleImputer(), StandardScaler()]),
     ], df_out=True)
 
@@ -243,31 +243,41 @@ def get_original_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: str)
 
 def get_features(clip_results: Sequence[Instance],
                  max_feature_count: Optional[int] = None) -> Tuple[pd.DataFrame, Sequence[int]]:
-    dict_features = {"index": [], "sent": [], "n_sent": [], "word_original": [], "word_replacement": [], "POS": [],
-                     "Levin-original": [], "Levin-replacement": [], "LIWC-original": [], "LIWC-replacement": [],
-                     "concreteness-original": [], "concreteness-replacement": [], "wup_similarity": [], "label": [],
-                     "clip-score-diff": []}
+    if max_feature_count:
+        clip_results = clip_results[:max_feature_count]
+
+    dict_features: Dict[str, Any] = {"word_original": [], "word_replacement": [], "POS": [],
+                                     "Levin-original": [], "Levin-replacement": [], "LIWC-original": [],
+                                     "LIWC-replacement": [], "concreteness-original": [],
+                                     "concreteness-replacement": [], "wup_similarity": []}
 
     levin_dict, _ = parse_levin_file()
     levin_semantic_broad, _, _ = parse_levin_dict(levin_dict)
     dict_liwc, _ = parse_liwc_file()
     dict_concreteness = parse_concreteness_file()
 
-    if max_feature_count:
-        clip_results = clip_results[:max_feature_count]
+    sentences = [x[1] for x in clip_results]
+    negative_sentences = [x[2] for x in clip_results]
 
-    embedded_sentences = text_model.encode([x[1] for x in clip_results], show_progress_bar=True)
-    embedded_neg_sentences = text_model.encode([x[2] for x in clip_results], show_progress_bar=True)
+    dict_features["index"] = [x[0] for x in clip_results]
+    dict_features["sent"] = sentences
+    dict_features["n_sent"] = negative_sentences
+
+    dict_features["label"] = [int(x[-2] == "pos") for x in clip_results]
+    dict_features["clip-score-diff"] = [x[-1] for x in clip_results]
+
+    embedded_sentences = text_model.encode(sentences, show_progress_bar=True)
+    embedded_neg_sentences = text_model.encode(negative_sentences, show_progress_bar=True)
 
     # TODO: can we save computation?
     dict_features["text_similarity"] = util.cos_sim(embedded_sentences, embedded_neg_sentences).diag()
 
-    for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction, clip_score_diff in tqdm(
+    for _, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, _, _ in tqdm(
             clip_results, desc="Computing the features"):
         word_original, word_replacement = get_original_word(pos_triplet, neg_triplet, neg_type)
 
         if not word_replacement or not word_original:
-            raise ValueError(f"Found empty word original or word replacement in index {index}")
+            raise ValueError(f"Found empty word original or word replacement")
 
         if neg_type == "v":
             levin_classes_w_original = get_levin_category(word_original, levin_semantic_broad)  # TODO: other Levin?
@@ -283,30 +293,29 @@ def get_features(clip_results: Sequence[Instance],
 
         wup_similarity = get_wup_similarity(word_original, word_replacement, pos=neg_type)
 
-        dict_features["index"].append(index)
-        dict_features["sent"].append(sentence)
-        dict_features["n_sent"].append(neg_sentence)
         dict_features["word_original"].append(word_original)
         dict_features["word_replacement"].append(word_replacement)
         dict_features["POS"].append(neg_type)
-        # dict_features["Levin"].append(levin_classes_w_original)
         dict_features["Levin-original"].append(levin_classes_w_original)
         dict_features["Levin-replacement"].append(levin_classes_w_replacement)
-        # dict_features["LIWC"].append(liwc_category_w_original)
         dict_features["LIWC-original"].append(liwc_category_w_original)
         dict_features["LIWC-replacement"].append(liwc_category_w_replacement)
-        # dict_features["concreteness"].append(concreteness_score_w_original)
         dict_features["concreteness-original"].append(concreteness_w_original)
         dict_features["concreteness-replacement"].append(concreteness_w_replacement)
         dict_features["wup_similarity"].append(wup_similarity)
 
-        dict_features["label"].append(int(clip_prediction == "pos"))
-        dict_features["clip-score-diff"].append(clip_score_diff)
+    embedded_original_words = text_model.encode(dict_features["word_original"], show_progress_bar=True)
+    embedded_replacement_words = text_model.encode(dict_features["word_replacement"], show_progress_bar=True)
+
+    # TODO: can we save computation?
+    dict_features["word_similarity"] = util.cos_sim(embedded_original_words, embedded_replacement_words).diag()
 
     levin_liwc = [item for sublist in dict_features["Levin-original"] + dict_features["Levin-replacement"] +
                   dict_features["LIWC-original"] + dict_features["LIWC-replacement"] for item in sublist]
     features_count = (levin_liwc + ["POS-" + v for v in dict_features["POS"]] +
                       ["text_similarity"] * len(dict_features["text_similarity"]) +
+                      ["word_similarity"] * len(dict_features["word_similarity"]) +
+                      ["wup_similarity"] * len(dict_features["wup_similarity"]) +
                       ["concreteness-original"] * len(dict_features["concreteness-original"]) +
                       ["concreteness-replacement"] * len(dict_features["concreteness-replacement"]))
     df = pd.DataFrame.from_dict(dict_features)
