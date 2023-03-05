@@ -13,7 +13,6 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from nltk.corpus import wordnet
-from nltk.corpus.reader.wordnet import WordNetError
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from sentence_transformers import SentenceTransformer, util
 from sklearn import svm
@@ -131,21 +130,12 @@ def get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Sequ
             for category in categories]
 
 
-def get_wup_similarity(word_original: str, word_replacement: str, pos: Literal["s", "v", "o"]) -> float:
-    if pos == "s" or pos == "o":
-        pos = "n"  # TODO: it might have other types of words different from nouns.
-
-    try:
-        syn1 = wordnet.synset(f"{word_original}.{pos}.01")
-    except WordNetError:
-        return float("nan")
-
-    try:
-        syn2 = wordnet.synset(f"{word_replacement}.{pos}.01")
-    except WordNetError:
-        return float("nan")
-
-    return syn1.wup_similarity(syn2)
+def get_wup_similarity(word_original: str, word_replacement: str, neg_type: Literal["s", "v", "o"]) -> float:
+    pos = "v" if neg_type == "v" else "n"
+    return max((synset_original.wup_similarity(synset_replacement)
+                for synset_original in wordnet.synsets(word_original, pos=pos)
+                for synset_replacement in wordnet.synsets(word_replacement, pos=pos)),
+               default=float("nan"))
 
 
 def get_concreteness_score(word: str, dict_concreteness: Mapping[str, float]) -> float:
@@ -292,7 +282,7 @@ def get_features(clip_results: Sequence[Instance],
         concreteness_w_original = get_concreteness_score(word_original, dict_concreteness)
         concreteness_w_replacement = get_concreteness_score(word_replacement, dict_concreteness)
 
-        wup_similarity = get_wup_similarity(word_original, word_replacement, pos=neg_type)
+        wup_similarity = get_wup_similarity(word_original, word_replacement, neg_type=neg_type)
 
         dict_features["word_original"].append(word_original)
         dict_features["word_replacement"].append(word_replacement)
@@ -405,8 +395,7 @@ def merge_csvs_and_filter_data(probes_path: str = "data/svo_probes.csv", neg_pat
 
 
 def delete_multiple_element(list_object: List[int], indices: Sequence[int]) -> None:
-    indices = sorted(indices, reverse=True)
-    for i in indices:
+    for i in sorted(indices, reverse=True):
         if i < len(list_object):
             list_object.pop(i)
 
@@ -416,14 +405,12 @@ def process_features(clip_results: Sequence[Instance],
                      feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, Sequence[int], np.ndarray]:
     df, features_count = get_features(clip_results, max_feature_count=max_feature_count)
 
-    labels = df["clip-score-diff"].to_numpy()
-
     features = transform_features(df)
 
     features = features.loc[:, ((features != 0).sum(0) >= feature_min_non_zero_values)]
 
     # print_metrics(df, feature_names, features)
-    return features, features_count, labels
+    return features, features_count, df["clip-score-diff"]
 
 
 def build_classifier() -> svm.LinearSVC:
