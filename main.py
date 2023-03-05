@@ -6,7 +6,7 @@ import string
 from collections import Counter, defaultdict
 from functools import partial
 from multiprocessing import Pool
-from typing import Any, Container, Dict, Literal, Mapping, Optional, Sequence, Set, Tuple, get_args
+from typing import Any, Container, Dict, Iterable, Literal, Mapping, Optional, Sequence, Set, Tuple, get_args
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -79,7 +79,7 @@ def read_data(path: str) -> Sequence[Instance]:
             zip(df.index, df["sentence"], df["neg_sentence"], df["pos_triplet"], df["neg_triplet"], df["neg_type"],
                 df["clip prediction"], df["clip_score_diff"]):
 
-        sentence = pre_process_sentences(sentence)  # remove punctuation
+        sentence = pre_process_sentences(sentence)
         neg_sentence = pre_process_sentences(neg_sentence)
 
         parsed_pos_triplet = parse_triplets(pos_triplet)
@@ -193,15 +193,11 @@ def parse_levin_dict(levin_dict: Mapping[str, Sequence[str]],
 def _fix_one_hot_encoder_columns(df: pd.DataFrame, mapper: DataFrameMapper) -> pd.DataFrame:
     for columns, transformer, kwargs in mapper.built_features:
         if isinstance(transformer, OneHotEncoder):
+            assert isinstance(columns, Iterable) and not isinstance(columns, str)
+
             new_names = transformer.get_feature_names_out(columns)
 
-            if "alias" in kwargs:
-                old_name_prefix = kwargs.get("alias")
-            elif isinstance(columns, list):
-                old_name_prefix = "_".join(str(c) for c in columns)
-            else:
-                old_name_prefix = columns
-
+            old_name_prefix = kwargs.get("alias", "_".join(str(c) for c in columns))
             old_names = [f"{old_name_prefix}_{i}" for i in range(len(new_names))]
 
             df = df.rename(columns=dict(zip(old_names, new_names)))
