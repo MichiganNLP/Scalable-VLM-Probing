@@ -201,7 +201,8 @@ def _fix_one_hot_encoder_columns(df: pd.DataFrame, mapper: DataFrameMapper) -> p
     return df
 
 
-def transform_features_to_numbers(df: pd.DataFrame, merge_original_and_replacement: bool = True) -> pd.DataFrame:
+def transform_features_to_numbers(df: pd.DataFrame,
+                                  merge_original_and_replacement_features: bool = True) -> pd.DataFrame:
     df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
 
     mapper = DataFrameMapper([
@@ -219,7 +220,7 @@ def transform_features_to_numbers(df: pd.DataFrame, merge_original_and_replaceme
     new_df = mapper.fit_transform(df)
     new_df = _fix_one_hot_encoder_columns(new_df, mapper)
 
-    if merge_original_and_replacement:
+    if merge_original_and_replacement_features:
         for column in new_df.columns:
             if column.startswith(("Levin-original", "LIWC-original")):
                 prefix = column.split("-", maxsplit=1)[0]
@@ -389,12 +390,14 @@ def print_metrics(df: pd.DataFrame, feature_names: Sequence[str], features: np.n
 
 
 def compute_numeric_features(clip_results: pd.DataFrame, max_feature_count: Optional[int] = None,
+                             merge_original_and_replacement_features: bool = True, do_regression: bool = True,
                              feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, Sequence[int], np.ndarray]:
     raw_features, features_count = compute_features(clip_results, max_feature_count=max_feature_count)
-    features = transform_features_to_numbers(raw_features)
+    features = transform_features_to_numbers(
+        raw_features, merge_original_and_replacement_features=merge_original_and_replacement_features)
     features = features.loc[:, ((features != 0).sum(0) >= feature_min_non_zero_values)]
     # print_metrics(features, feature_names, features)
-    return features, features_count, raw_features["clip-score-diff"]
+    return features, features_count, raw_features["clip-score-diff"] if do_regression else raw_features["label"]
 
 
 def build_classifier() -> svm.LinearSVC:
