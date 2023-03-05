@@ -6,7 +6,7 @@ import string
 from collections import Counter, defaultdict
 from functools import partial
 from multiprocessing import Pool
-from typing import Any, Container, Dict, Literal, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Container, Dict, Literal, Mapping, Optional, Sequence, Set, Tuple, get_args
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,6 +22,7 @@ from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardSc
 from sklearn_pandas import DataFrameMapper
 from tqdm.auto import tqdm
 
+NegType = Literal["s", "v", "o"]
 Triplet = Tuple[str, str, str]
 Instance = Tuple[int, str, str, Triplet, Triplet, str, bool, float]
 
@@ -130,7 +131,7 @@ def get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Sequ
             for category in categories]
 
 
-def get_wup_similarity(word_original: str, word_replacement: str, neg_type: Literal["s", "v", "o"]) -> float:
+def get_wup_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
     pos = "v" if neg_type == "v" else "n"
     return max((synset_original.wup_similarity(synset_replacement)
                 for synset_original in wordnet.synsets(word_original, pos=pos)
@@ -212,7 +213,7 @@ def transform_features(df: pd.DataFrame, merge_original_and_replacement: bool = 
     df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
 
     mapper = DataFrameMapper([
-        # (["POS"], OneHotEncoder()),
+        # (["neg_type"], OneHotEncoder()),
         ("Levin-original", MultiLabelBinarizer()),
         ("Levin-replacement", MultiLabelBinarizer()),
         ("LIWC-original", MultiLabelBinarizer()),
@@ -240,7 +241,7 @@ def transform_features(df: pd.DataFrame, merge_original_and_replacement: bool = 
     return new_df
 
 
-def get_original_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: str) -> Tuple[str, str]:
+def get_original_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: NegType) -> Tuple[str, str]:
     if neg_type == "s":
         return pos_triplet[0], neg_triplet[0]
     elif neg_type == "v":
@@ -248,7 +249,7 @@ def get_original_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: str)
     elif neg_type == "o":
         return pos_triplet[2], neg_triplet[2]
     else:
-        raise ValueError(f"Wrong neg_type: {neg_type}, needs to be from s,v,o")
+        raise ValueError(f"Wrong neg_type: {neg_type}, needs to be one from {get_args(NegType)}")
 
 
 def get_features(clip_results: Sequence[Instance],
@@ -256,7 +257,7 @@ def get_features(clip_results: Sequence[Instance],
     if max_feature_count:
         clip_results = clip_results[:max_feature_count]
 
-    dict_features: Dict[str, Any] = {"word_original": [], "word_replacement": [], "POS": [],
+    dict_features: Dict[str, Any] = {"word_original": [], "word_replacement": [], "neg_type": [],
                                      "Levin-original": [], "Levin-replacement": [], "LIWC-original": [],
                                      "LIWC-replacement": [], "concreteness-original": [],
                                      "concreteness-replacement": [], "wup_similarity": []}
@@ -306,7 +307,7 @@ def get_features(clip_results: Sequence[Instance],
 
         dict_features["word_original"].append(word_original)
         dict_features["word_replacement"].append(word_replacement)
-        dict_features["POS"].append(neg_type)
+        dict_features["neg_type"].append(neg_type)
         dict_features["Levin-original"].append(levin_classes_w_original)
         dict_features["Levin-replacement"].append(levin_classes_w_replacement)
         dict_features["LIWC-original"].append(liwc_category_w_original)
@@ -322,7 +323,7 @@ def get_features(clip_results: Sequence[Instance],
 
     levin_liwc = [item for sublist in dict_features["Levin-original"] + dict_features["Levin-replacement"] +
                   dict_features["LIWC-original"] + dict_features["LIWC-replacement"] for item in sublist]
-    features_count = (levin_liwc + ["POS-" + v for v in dict_features["POS"]] +
+    features_count = (levin_liwc + ["neg_type-" + v for v in dict_features["neg_type"]] +
                       ["text_similarity"] * len(dict_features["text_similarity"]) +
                       ["word_similarity"] * len(dict_features["word_similarity"]) +
                       ["wup_similarity"] * len(dict_features["wup_similarity"]) +
