@@ -66,9 +66,13 @@ def pre_process_sentences(sentence: str) -> str:
     return sentence
 
 
-def read_data(path: str = "data/merged.csv") -> Sequence[Instance]:
-    df = pd.read_csv(path, index_col=0)
-    df = df.sort_index()
+def read_data(path: str) -> Sequence[Instance]:
+    df = pd.read_csv(path, index_col=0, usecols=["Unnamed: 0", "sentence", "neg_sentence", "pos_triplet", "neg_triplet",
+                                                 "neg_type", "clip prediction", "clip_score_diff"]).sort_index()
+
+    # df.sentence = df.sentence.apply(pre_process_sentences)
+    # df.neg_sentence = df.neg_sentence.apply(pre_process_sentences)
+
     results = []
     for index, sentence, neg_sentence, pos_triplet, neg_triplet, neg_type, clip_prediction, clip_score_diff in \
             zip(df.index, df["sentence"], df["neg_sentence"], df["pos_triplet"], df["neg_triplet"], df["neg_type"],
@@ -183,11 +187,32 @@ def parse_levin_dict(levin_dict: Mapping[str, Sequence[str]],
     return levin_semantic_broad, levin_semantic_fine_grained, levin_alternations
 
 
+# sklearn-pandas doesn't support the new way (scikit-learn >= 1.1) some transformers output the features.
+# See https://github.com/scikit-learn-contrib/sklearn-pandas/pull/248
+def _fix_one_hot_encoder_columns(df: pd.DataFrame, mapper: DataFrameMapper) -> pd.DataFrame:
+    for columns, transformer, kwargs in mapper.built_features:
+        if isinstance(transformer, OneHotEncoder):
+            new_names = transformer.get_feature_names_out(columns)
+
+            if "alias" in kwargs:
+                old_name_prefix = kwargs.get("alias")
+            elif isinstance(columns, list):
+                old_name_prefix = '_'.join(str(c) for c in columns)
+            else:
+                old_name_prefix = columns
+
+            old_names = [f"{old_name_prefix}_{i}" for i in range(len(new_names))]
+
+            df = df.rename(columns=dict(zip(old_names, new_names)))
+
+    return df
+
+
 def transform_features(df: pd.DataFrame, merge_original_and_replacement: bool = True) -> pd.DataFrame:
     df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
 
     mapper = DataFrameMapper([
-        (["POS"], OneHotEncoder(handle_unknown="ignore")),
+        # (["POS"], OneHotEncoder()),
         ("Levin-original", MultiLabelBinarizer()),
         ("Levin-replacement", MultiLabelBinarizer()),
         ("LIWC-original", MultiLabelBinarizer()),
@@ -199,7 +224,7 @@ def transform_features(df: pd.DataFrame, merge_original_and_replacement: bool = 
     ], df_out=True)
 
     new_df = mapper.fit_transform(df)
-    new_df = new_df.rename(columns={"POS_x0_o": "POS_o", "POS_x0_s": "POS_s", "POS_x0_v": "POS_v"})
+    new_df = _fix_one_hot_encoder_columns(new_df, mapper)
 
     if merge_original_and_replacement:
         for column in new_df.columns:
@@ -423,7 +448,6 @@ def analyse_coef_weights(features: np.ndarray, labels: np.ndarray,
 
 
 def compute_ols_summary(features: pd.DataFrame, labels: np.ndarray) -> None:
-    features = features.drop(["POS_o", "POS_s", "POS_v"], axis="columns")
     features = sm.add_constant(features)
 
     summary = sm.OLS(labels, features).fit().summary()
@@ -451,9 +475,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    # # merge_csvs_and_filter_data()
-    #
-    clip_results = read_data()
+    clip_results = read_data("data/merged.csv")
     features, features_count, labels = process_features(clip_results, max_feature_count=1000 if args.debug else None)
     # coef_weights, coef_significance, coef_sign = analyse_coef_weights(features, labels, args.iterations)
     compute_ols_summary(features, labels)
