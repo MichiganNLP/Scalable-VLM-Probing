@@ -270,7 +270,7 @@ def parse_levin_dict(levin_dict: Mapping[str, Sequence[str]],
     return levin_semantic_broad, levin_semantic_fine_grained, levin_alternations
 
 
-def transform_features(df: pd.DataFrame) -> pd.DataFrame:
+def transform_features(df: pd.DataFrame, merge_original_and_replacement: bool = True) -> pd.DataFrame:
     df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
 
     mapper = DataFrameMapper([
@@ -285,6 +285,17 @@ def transform_features(df: pd.DataFrame) -> pd.DataFrame:
 
     new_df = mapper.fit_transform(df)
     new_df = new_df.rename(columns={"POS_x0_o": "POS_o", "POS_x0_s": "POS_s", "POS_x0_v": "POS_v"})
+
+    if merge_original_and_replacement:
+        for column in new_df.columns:
+            if column.startswith(("Levin-original", "LIWC-original")):
+                prefix = column.split("-", maxsplit=1)[0]
+                category = column.split("_", maxsplit=1)[1]
+
+                replacement_column_name = f"{prefix}-replacement_{category}"
+                if replacement_column_name in new_df.columns:
+                    new_df[f"{prefix}_change_{category}"] = new_df[column] - new_df[replacement_column_name]
+                    new_df = new_df.drop([column, replacement_column_name], axis="columns")
 
     return new_df
 
