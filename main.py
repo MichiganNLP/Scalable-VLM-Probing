@@ -138,8 +138,8 @@ def get_concreteness_score(word: str, dict_concreteness: Mapping[str, float]) ->
     return dict_concreteness.get(word, float("nan"))
 
 
-def parse_levin_file(path: str = "data/levin_verbs.txt") -> Tuple[Mapping[str, Sequence[str]],
-                                                                  Mapping[str, Sequence[str]]]:
+def parse_levin_file(
+        path: str = "data/levin_verbs.txt") -> Tuple[Mapping[str, Sequence[str]], Mapping[str, Sequence[str]]]:
     content = ""
     levin_dict = {}
     compressed_levin_dict = defaultdict(list)
@@ -165,9 +165,8 @@ def parse_levin_file(path: str = "data/levin_verbs.txt") -> Tuple[Mapping[str, S
 
 
 def parse_levin_dict(levin_dict: Mapping[str, Sequence[str]],
-                     path: str = "data/levin_semantic_broad.json") -> Tuple[Mapping[str, Container[str]],
-                                                                            Mapping[str, Sequence[str]],
-                                                                            Mapping[str, Sequence[str]]]:
+                     path: str = "data/levin_semantic_broad.json",
+                     ) -> Tuple[Mapping[str, Container[str]], Mapping[str, Sequence[str]], Mapping[str, Sequence[str]]]:
     with open(path) as file:
         map_int_to_name = {int(k): v for k, v in json.load(file).items()}
 
