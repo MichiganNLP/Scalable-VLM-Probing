@@ -206,7 +206,7 @@ def transform_features_to_numbers(df: pd.DataFrame,
     df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
 
     mapper = DataFrameMapper([
-        # (["neg_type"], OneHotEncoder()),
+        # (["neg_type"], OneHotEncoder(dtype=bool)),
         ("Levin-original", MultiLabelBinarizer()),
         ("Levin-replacement", MultiLabelBinarizer()),
         ("LIWC-original", MultiLabelBinarizer()),
@@ -454,6 +454,33 @@ def compute_ols_summary(features: pd.DataFrame, labels: np.ndarray) -> None:
 
     print("Significant features:")
     print(df.to_string())
+
+
+def is_feature_binary(feature: np.ndarray):
+    return feature.dtype == bool or (np.issubdtype(feature.dtype, np.integer) and set(np.unique(feature)) == {0, 1})
+
+
+def compute_dominance_score(features: pd.DataFrame, labels: np.ndarray) -> None:
+    assert len(features) == len(labels)
+    assert is_feature_binary(labels)
+
+    total_pos = labels.sum()
+
+    neg_labels = ~labels
+    total_neg = neg_labels.sum()
+
+    dominance_scores = {}
+
+    for column in features.columns:
+        feature = features[column]
+        if is_feature_binary(feature):
+            pos_coverage = feature[labels].sum() / total_pos
+            neg_coverage = feature[neg_labels].sum() / total_neg
+            dominance_scores[column] = pos_coverage / neg_coverage
+
+    print("Dominance scores:")
+    for column, score in sorted(dominance_scores.items(), key=lambda x: x[1], reverse=True):
+        print(score, column)
 
 
 def parse_args() -> argparse.Namespace:
