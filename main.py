@@ -19,7 +19,6 @@ from sentence_transformers import SentenceTransformer, util
 from sklearn import svm
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import Ridge
-from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardScaler
 from sklearn_pandas import DataFrameMapper
@@ -225,6 +224,8 @@ def transform_features_to_numbers(df: pd.DataFrame,
     new_df = _fix_one_hot_encoder_columns(new_df, mapper)
 
     if merge_original_and_replacement_features:
+        new_columns = {}
+
         for column in new_df.columns:
             if column.startswith(("Levin-original", "LIWC-original")):
                 prefix = column.split("-", maxsplit=1)[0]
@@ -232,8 +233,10 @@ def transform_features_to_numbers(df: pd.DataFrame,
 
                 replacement_column_name = f"{prefix}-replacement_{category}"
                 if replacement_column_name in new_df.columns:
-                    new_df[f"{prefix}_change_{category}"] = new_df[column] - new_df[replacement_column_name]
+                    new_columns[f"{prefix}_change_{category}"] = new_df[column] - new_df[replacement_column_name]
                     new_df = new_df.drop([column, replacement_column_name], axis="columns")
+
+        new_df = new_df.assign(**new_columns)  # Assign them together to avoid fragmentation.
 
     return new_df
 
@@ -449,8 +452,8 @@ def analyse_coef_weights(features: np.ndarray, labels: np.ndarray,
     return coef_weights, coef_significance, coef_sign
 
 
-def compute_ols_summary(features: pd.DataFrame, labels: np.ndarray) -> None:
-    # features = sm.add_constant(features)
+def compute_ols_summary(features: pd.DataFrame, labels: np.ndarray, raw_features: pd.DataFrame) -> None:
+    features = sm.add_constant(features)
 
     model = sm.OLS(labels, features)
     results = model.fit()
@@ -467,6 +470,23 @@ def compute_ols_summary(features: pd.DataFrame, labels: np.ndarray) -> None:
 
     print("Significant features:")
     print(df.to_string())
+
+    print()
+    print("Example words from the significant features:")
+    for feature_name in df.index:
+        prefix = feature_name.split("_", maxsplit=1)[0]
+        if prefix in {"LIWC", "Levin"}:
+            category = feature_name.split("_", maxsplit=2)[-1]
+
+            original_words = raw_features[raw_features[f"{prefix}-original"].apply(
+                lambda categories: category in categories)].word_original
+            replacement_words = raw_features[raw_features[f"{prefix}-replacement"].apply(
+                lambda categories: category in categories)].word_replacement
+            words = pd.concat([original_words, replacement_words])
+            counter = Counter(words.tolist())
+
+            print(feature_name, "--", ", ".join(f"{word} ({freq})" for word, freq in counter.most_common(5)))
+
 
 def ridge_regression(features: pd.DataFrame, labels: np.ndarray) -> None:
     clf = Ridge(alpha=0.1)
