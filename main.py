@@ -186,7 +186,8 @@ def main() -> None:
     max_feature_count = 1000 if args.debug else None
 
     do_regression = args.model in REGRESSION_MODELS
-    merge_original_and_replacement_features = do_regression
+    # merge_original_and_replacement_features = do_regression#TODO: WHY?
+    merge_original_and_replacement_features = False
 
     raw_features, features, features_count, labels = load_features(
         path=args.input_path, max_feature_count=max_feature_count,

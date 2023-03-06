@@ -136,6 +136,25 @@ def _get_levin_category(word: str, dict_levin_semantic: Mapping[str, Container[s
             for category, category_words in dict_levin_semantic.items()
             if word in category_words]
 
+def _get_nb_synsets(word: str, neg_type: NegType) -> int:
+    # pos = _neg_type_to_pos(neg_type)
+    # synsets = wordnet.synsets(word, pos=pos)
+    synsets = wordnet.synsets(word) #total nb of senses
+    return len(synsets)
+
+def _get_hypernyms(word:str, neg_type: NegType) -> Sequence[str]:
+    pos = _neg_type_to_pos(neg_type)
+    synsets = wordnet.synsets(word, pos=pos)
+    if not synsets:
+        return "nan" # FIXME: or word?
+    hypernyms = synsets[0].hypernyms()
+    if hypernyms:
+        # broad_semantic_categ = hypernyms[0]._lexname.split(".")[-1]
+        broad_semantic_categ = hypernyms[0]._lemma_names[0]
+    else:
+        # broad_semantic_categ = synsets[0]._lexname.split(".")[-1]
+        broad_semantic_categ = synsets[0]._lemma_names[0]
+    return [broad_semantic_categ]
 
 @functools.lru_cache
 def _parse_liwc_file(path: str = "data/LIWC.2015.all.txt") -> Tuple[Mapping[str, Sequence[str]], Set[str]]:
@@ -182,6 +201,19 @@ def _compute_wup_similarity(word_original: str, word_replacement: str, neg_type:
                 for synset_replacement in wordnet.synsets(word_replacement, pos=pos)),
                default=float("nan"))
 
+def _compute_lch_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
+    pos = _neg_type_to_pos(neg_type)
+    return max((synset_original.lch_similarity(synset_replacement)
+                for synset_original in wordnet.synsets(word_original, pos=pos)
+                for synset_replacement in wordnet.synsets(word_replacement, pos=pos)),
+               default=float("nan"))
+
+def _compute_path_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
+    pos = _neg_type_to_pos(neg_type)
+    return max((synset_original.path_similarity(synset_replacement)
+                for synset_original in wordnet.synsets(word_original, pos=pos)
+                for synset_replacement in wordnet.synsets(word_replacement, pos=pos)),
+               default=float("nan"))
 
 # sklearn-pandas doesn't support the new way (scikit-learn >= 1.1) some transformers output the features.
 # See https://github.com/scikit-learn-contrib/sklearn-pandas/pull/248
@@ -203,6 +235,7 @@ def _fix_one_hot_encoder_columns(df: pd.DataFrame, mapper: DataFrameMapper) -> p
 def _transform_features_to_numbers(df: pd.DataFrame,
                                    merge_original_and_replacement_features: bool = True) -> pd.DataFrame:
     df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
+    df["frequency-change"] = df["frequency-original"] - df["frequency-replacement"]
 
     mapper = DataFrameMapper([
         # (["neg_type"], OneHotEncoder(dtype=bool)),
@@ -210,10 +243,21 @@ def _transform_features_to_numbers(df: pd.DataFrame,
         ("Levin-replacement", MultiLabelBinarizer()),
         ("LIWC-original", MultiLabelBinarizer()),
         ("LIWC-replacement", MultiLabelBinarizer()),
+        ("WordNet-original", MultiLabelBinarizer()),
+        ("WordNet-replacement", MultiLabelBinarizer()),
         (["concreteness-change"], [SimpleImputer(), StandardScaler()]),
+        (["concreteness-original"], [SimpleImputer(), StandardScaler()]),
+        (["concreteness-replacement"], [SimpleImputer(), StandardScaler()]),
+        (["frequency-change"], [SimpleImputer(), StandardScaler()]),
+        (["frequency-original"], [SimpleImputer(), StandardScaler()]),
+        (["frequency-replacement"], [SimpleImputer(), StandardScaler()]),
         (["text_similarity"], [SimpleImputer(), StandardScaler()]),
         (["word_similarity"], [SimpleImputer(), StandardScaler()]),
+        (["nb-synsets-original"], [SimpleImputer(), StandardScaler()]),
+        (["nb-synsets-replacement"], [SimpleImputer(), StandardScaler()]),
         # (["wup_similarity"], [SimpleImputer(), StandardScaler()]),
+        (["lch_similarity"], [SimpleImputer(), StandardScaler()]),
+        # (["path_similarity"], [SimpleImputer(), StandardScaler()]),
     ], df_out=True)
 
     new_df = mapper.fit_transform(df)
@@ -224,7 +268,7 @@ def _transform_features_to_numbers(df: pd.DataFrame,
         columns_to_remove = []
 
         for column in new_df.columns:
-            if column.startswith(("Levin-original", "LIWC-original")):
+            if column.startswith(("Levin-original", "LIWC-original", "WordNet-original")):
                 prefix = column.split("-", maxsplit=1)[0]
                 category = column.split("_", maxsplit=1)[1]
 
@@ -258,9 +302,13 @@ def _compute_features(clip_results: pd.DataFrame,
         clip_results = clip_results[:max_feature_count]
 
     dict_features: Dict[str, Any] = {"word_original": [], "word_replacement": [], "neg_type": [],
-                                     "Levin-original": [], "Levin-replacement": [], "LIWC-original": [],
-                                     "LIWC-replacement": [], "concreteness-original": [],
-                                     "concreteness-replacement": [], "wup_similarity": []}
+                                     "Levin-original": [], "Levin-replacement": [],
+                                     "LIWC-original": [], "LIWC-replacement": [],
+                                     "WordNet-original": [], "WordNet-replacement": [],
+                                     "frequency-original": [], "frequency-replacement": [],
+                                     "concreteness-original": [], "concreteness-replacement": [],
+                                     "nb-synsets-original":[], "nb-synsets-replacement": [], "text_similarity": [],
+                                     "wup_similarity": [], "lch_similarity": [], "path_similarity": []}
 
     levin_dict, _ = _parse_levin_file()
     _, _, _, levin_all = _parse_levin_dict(levin_dict)
@@ -275,6 +323,9 @@ def _compute_features(clip_results: pd.DataFrame,
 
     dict_features["label"] = clip_results["clip prediction"]
     dict_features["clip-score-diff"] = clip_results.clip_score_diff
+
+    with open('data/words_counter_LAION.json') as json_file:
+        words_counter_LAION = json.load(json_file)
 
     embedded_sentences = text_model.encode(sentences, show_progress_bar=True)
     embedded_neg_sentences = text_model.encode(negative_sentences, show_progress_bar=True)
@@ -298,11 +349,21 @@ def _compute_features(clip_results: pd.DataFrame,
         liwc_category_w_original = _get_liwc_category(word_original, dict_liwc)
         liwc_category_w_replacement = _get_liwc_category(word_replacement, dict_liwc)
 
+        frequency_w_original = words_counter_LAION[word_original] if word_original in words_counter_LAION else 0
+        frequency_w_replacement = words_counter_LAION[word_replacement] if word_replacement in words_counter_LAION else 0
+
         concreteness_w_original = _get_concreteness_score(word_original, dict_concreteness)
         concreteness_w_replacement = _get_concreteness_score(word_replacement, dict_concreteness)
 
-        # wup_similarity = compute_wup_similarity(word_original, word_replacement, neg_type=row.neg_type)
-        wup_similarity = float("nan")
+        # wup_similarity = _compute_wup_similarity(word_original, word_replacement, neg_type=row.neg_type)
+        lch_similarity = _compute_lch_similarity(word_original, word_replacement, neg_type=row.neg_type)
+        # path_similarity = _compute_path_similarity(word_original, word_replacement, neg_type=row.neg_type)
+        wup_similarity, path_similarity = float("nan"), float("nan")
+        nb_synsets_word_original = _get_nb_synsets(word_original, row.neg_type)
+        nb_synsets_word_replacement = _get_nb_synsets(word_replacement, row.neg_type)
+
+        wordnet_semantic_categ_original = _get_hypernyms(word_original, row.neg_type)
+        wordnet_semantic_categ_replacement = _get_hypernyms(word_replacement, row.neg_type)
 
         dict_features["word_original"].append(word_original)
         dict_features["word_replacement"].append(word_replacement)
@@ -311,9 +372,18 @@ def _compute_features(clip_results: pd.DataFrame,
         dict_features["Levin-replacement"].append(levin_classes_w_replacement)
         dict_features["LIWC-original"].append(liwc_category_w_original)
         dict_features["LIWC-replacement"].append(liwc_category_w_replacement)
+        dict_features["WordNet-original"].append(wordnet_semantic_categ_original)
+        dict_features["WordNet-replacement"].append(wordnet_semantic_categ_replacement)
+        dict_features["frequency-original"].append(frequency_w_original)
+        dict_features["frequency-replacement"].append(frequency_w_replacement)
         dict_features["concreteness-original"].append(concreteness_w_original)
         dict_features["concreteness-replacement"].append(concreteness_w_replacement)
+        dict_features["nb-synsets-original"].append(nb_synsets_word_original)
+        dict_features["nb-synsets-replacement"].append(nb_synsets_word_replacement)
         dict_features["wup_similarity"].append(wup_similarity)
+        dict_features["lch_similarity"].append(lch_similarity)
+        dict_features["path_similarity"].append(path_similarity)
+
 
     embedded_original_words = text_model.encode(dict_features["word_original"], show_progress_bar=True)
     embedded_replacement_words = text_model.encode(dict_features["word_replacement"], show_progress_bar=True)
@@ -322,12 +392,21 @@ def _compute_features(clip_results: pd.DataFrame,
 
     levin_liwc = [item for sublist in dict_features["Levin-original"] + dict_features["Levin-replacement"] +
                   dict_features["LIWC-original"] + dict_features["LIWC-replacement"] for item in sublist]
-    features_count = (levin_liwc + ["neg_type-" + v for v in dict_features["neg_type"]] +
+    wordnet = dict_features["WordNet-original"] + dict_features["WordNet-replacement"]
+
+    features_count = (levin_liwc + wordnet + ["neg_type-" + v for v in dict_features["neg_type"]] +
                       ["text_similarity"] * len(dict_features["text_similarity"]) +
                       ["word_similarity"] * len(dict_features["word_similarity"]) +
                       ["wup_similarity"] * len(dict_features["wup_similarity"]) +
+                      ["lch_similarity"] * len(dict_features["lch_similarity"]) +
+                      ["path_similarity"] * len(dict_features["path_similarity"]) +
+                      ["frequency-original"] * len(dict_features["frequency-original"]) +
+                      ["frequency-replacement"] * len(dict_features["frequency-replacement"]) +
                       ["concreteness-original"] * len(dict_features["concreteness-original"]) +
-                      ["concreteness-replacement"] * len(dict_features["concreteness-replacement"]))
+                      ["concreteness-replacement"] * len(dict_features["concreteness-replacement"]) +
+                      ["nb-synsets-original"] * len(dict_features["nb-synsets-original"]) +
+                      ["nb-synsets-replacement"] * len(dict_features["nb-synsets-replacement"])
+                      )
 
     return pd.DataFrame.from_dict(dict_features), features_count
 
