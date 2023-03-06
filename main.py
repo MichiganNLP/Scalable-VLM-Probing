@@ -27,6 +27,10 @@ from tqdm.auto import tqdm
 NegType = Literal["s", "v", "o"]
 Triplet = Tuple[str, str, str]
 
+CLASSIFICATION_MODELS = {"dominance-score"}
+REGRESSION_MODELS = {"ols", "ridge", "svm"}
+MODELS = CLASSIFICATION_MODELS | REGRESSION_MODELS
+
 text_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 stemmer = PorterStemmer()
@@ -332,7 +336,7 @@ def compute_features(clip_results: pd.DataFrame,
     return pd.DataFrame.from_dict(dict_features), features_count
 
 
-def plot_coef_weights(coef_weights: np.ndarray, feature_names: Sequence[str],
+def plot_coef_weights(coef_weights: np.ndarray, features: pd.DataFrame,
                       path: str = "data/coef_importance.png", top_features: int = 5) -> None:
     coef = coef_weights.ravel()  # flatten array
     top_positive_coefficients = np.argsort(coef)[-top_features:]
@@ -342,19 +346,19 @@ def plot_coef_weights(coef_weights: np.ndarray, feature_names: Sequence[str],
     fig = plt.figure(figsize=(18, 7))
     colors = ["red" if c < 0 else "green" for c in coef[top_coefficients]]
     plt.bar(np.arange(2 * top_features), coef[top_coefficients], color=colors)
-    feature_names = np.array(feature_names)
+    feature_names = features.columns
     plt.xticks(np.arange(2 * top_features), feature_names[top_coefficients], rotation=45, ha="right")
     fig.savefig(path, bbox_inches="tight")
 
 
 # https://www.kaggle.com/code/pierpaolo28/pima-indians-diabetes-database/notebook
 def print_sorted_coef_weights(coef: np.ndarray, coef_significance: np.ndarray, coef_sign: np.ndarray,
-                              feature_names: Sequence[str], features_count: Sequence[int],
+                              features: pd.DataFrame, features_count: Sequence[int],
                               output_path: str = "data/sorted_features.csv") -> None:
     sorted_coefficients_idx = np.argsort(coef)[::-1]  # in descending order
     sorted_coefficients = [np.round(weight, 2) for weight in coef[sorted_coefficients_idx]]
 
-    feature_names = np.array(feature_names)
+    feature_names = features.columns
     sorted_feature_names = feature_names[sorted_coefficients_idx].tolist()
     sorted_feature_significance = coef_significance[sorted_coefficients_idx].tolist()
     sorted_feature_sign = coef_sign[sorted_coefficients_idx].tolist()
@@ -405,23 +409,25 @@ def print_metrics(clip_results: pd.DataFrame, features: pd.DataFrame) -> None:
 
 def compute_numeric_features(clip_results: pd.DataFrame, max_feature_count: Optional[int] = None,
                              merge_original_and_replacement_features: bool = True, do_regression: bool = True,
-                             feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, Sequence[int], np.ndarray]:
+                             feature_min_non_zero_values: int = 50
+                             ) -> Tuple[pd.DataFrame, pd.DataFrame, Sequence[int], np.ndarray]:
     raw_features, features_count = compute_features(clip_results, max_feature_count=max_feature_count)
     features = transform_features_to_numbers(
         raw_features, merge_original_and_replacement_features=merge_original_and_replacement_features)
     features = features.loc[:, ((features != 0).sum(0) >= feature_min_non_zero_values)]
     print_metrics(clip_results, features)
-    return features, features_count, raw_features["clip-score-diff"] if do_regression else raw_features["label"]
+    dependent_variable = raw_features["clip-score-diff"] if do_regression else raw_features["label"]
+    return raw_features, features, features_count, dependent_variable
 
 
 def build_classifier() -> svm.LinearSVC:
     return svm.LinearSVC(class_weight="balanced", max_iter=1_000_000)
 
 
-def classify_shuffled(features: np.ndarray, labels: np.ndarray, seed: int) -> np.ndarray:
+def classify_shuffled(features: pd.DataFrame, labels: np.ndarray, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
 
-    features = rng.permuted(features, axis=0)
+    features = features.sample(frac=1, random_state=rng)
 
     clf = build_classifier()
     clf.fit(features, labels)
@@ -429,7 +435,7 @@ def classify_shuffled(features: np.ndarray, labels: np.ndarray, seed: int) -> np
     return abs(clf.coef_.ravel())
 
 
-def analyse_coef_weights(features: np.ndarray, labels: np.ndarray,
+def analyze_coef_weights(features: pd.DataFrame, labels: np.ndarray,
                          iterations: int = 10_000) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     clf = build_classifier()
 
@@ -492,13 +498,12 @@ def ridge_regression(features: pd.DataFrame, labels: np.ndarray) -> None:
     clf = Ridge(alpha=0.1)
     clf.fit(features, labels)
     r_squared = clf.score(features, labels)
-    print(f"Ridge regression R^2: {r_squared}")
+    print("Ridge regression R^2:", r_squared)
     coef = clf.coef_
-    df = pd.DataFrame()
-    df['features'] = features.columns
-    df['coef'] = pd.Series(coef)
+    df = pd.DataFrame.from_dict({"features": features.columns, "coef": coef})
     df = df.sort_values(by=["coef"], ascending=False)
     print(df.to_string())
+
 
 def is_feature_binary(feature: np.ndarray):
     return feature.dtype == bool or (np.issubdtype(feature.dtype, np.integer) and set(np.unique(feature)) == {0, 1})
@@ -529,24 +534,37 @@ def compute_dominance_score(features: pd.DataFrame, labels: np.ndarray) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default="ols", choices=MODELS)
     parser.add_argument("--debug", action="store_true")
-    # parser.add_argument("--iterations", type=int, default=10_000)
+    parser.add_argument("--iterations", type=int, default=10_000, help="Only applies to the SVM model.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
+    max_feature_count = 1000 if args.debug else None
+
+    do_regression = args.model in REGRESSION_MODELS
+    merge_original_and_replacement_features = do_regression
+
     clip_results = load_clip_results("data/merged.csv")
-    features, features_count, labels = compute_numeric_features(clip_results,
-                                                                max_feature_count=1000 if args.debug else None)
-    # coef_weights, coef_significance, coef_sign = analyse_coef_weights(features, labels, args.iterations)
-    # compute_ols_summary(features, labels)
-    ridge_regression(features, labels)
+    raw_features, features, features_count, labels = compute_numeric_features(
+        clip_results, max_feature_count=max_feature_count,
+        merge_original_and_replacement_features=merge_original_and_replacement_features, do_regression=do_regression)
 
-    # print_sorted_coef_weights(coef_weights, coef_significance, coef_sign, feature_names, features_count)
-
-    # plot_coef_weights(coef_weights, feature_names)
+    if args.model == "dominance-score":
+        compute_dominance_score(features, labels)
+    elif args.model == "ols":
+        compute_ols_summary(features, labels, raw_features)
+    elif args.model == "ridge":
+        ridge_regression(features, labels)
+    elif args.model == "svm":
+        coef_weights, coef_significance, coef_sign = analyze_coef_weights(features, labels, args.iterations)
+        print_sorted_coef_weights(coef_weights, coef_significance, coef_sign, features, features_count)
+        plot_coef_weights(coef_weights, features)
+    else:
+        raise ValueError(f"Unknown model: {args.model} (should be in {MODELS}).")
 
 
 if __name__ == "__main__":
