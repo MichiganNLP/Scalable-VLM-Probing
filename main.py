@@ -229,6 +229,7 @@ def transform_features_to_numbers(df: pd.DataFrame,
 
     if merge_original_and_replacement_features:
         new_columns = {}
+        columns_to_remove = []
 
         for column in new_df.columns:
             if column.startswith(("Levin-original", "LIWC-original")):
@@ -238,9 +239,12 @@ def transform_features_to_numbers(df: pd.DataFrame,
                 replacement_column_name = f"{prefix}-replacement_{category}"
                 if replacement_column_name in new_df.columns:
                     new_columns[f"{prefix}_change_{category}"] = new_df[column] - new_df[replacement_column_name]
-                    new_df = new_df.drop([column, replacement_column_name], axis="columns")
+                    columns_to_remove.append(column)
+                    columns_to_remove.append(replacement_column_name)
 
-        new_df = new_df.assign(**new_columns)  # Assign them together to avoid fragmentation.
+        # Change them all together to avoid fragmentation.
+        new_df = new_df.drop(columns_to_remove, axis="columns")
+        new_df = pd.concat((new_df, pd.DataFrame.from_dict(new_columns)), axis="columns")
 
     return new_df
 
