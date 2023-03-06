@@ -285,7 +285,7 @@ def compute_features(clip_results: pd.DataFrame,
             raise ValueError(f"Found empty word original or word replacement")
 
         if row.neg_type == "v":
-            levin_classes_w_original = get_levin_category(word_original, levin_all)  # TODO: other Levin?
+            levin_classes_w_original = get_levin_category(word_original, levin_all)
             levin_classes_w_replacement = get_levin_category(word_replacement, levin_all)
         else:
             levin_classes_w_original, levin_classes_w_replacement = [], []
