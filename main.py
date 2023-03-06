@@ -394,6 +394,9 @@ def print_metrics(clip_results: pd.DataFrame, features: pd.DataFrame) -> None:
     print(f"Features size:", len(features.columns), "--", Counter(main_feature_names))
     print(f"Features shape:", features.shape)
 
+    print()
+    print()
+
 
 def compute_numeric_features(clip_results: pd.DataFrame, max_feature_count: Optional[int] = None,
                              merge_original_and_replacement_features: bool = True, do_regression: bool = True,
