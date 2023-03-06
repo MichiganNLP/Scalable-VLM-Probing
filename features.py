@@ -83,58 +83,6 @@ def _load_clip_results(path: str) -> pd.DataFrame:
 
 
 @functools.lru_cache
-def _parse_liwc_file(path: str = "data/LIWC.2015.all.txt") -> Tuple[Mapping[str, Sequence[str]], Set[str]]:
-    dict_liwc = defaultdict(list)
-    liwc_categories = set()
-    with open(path) as file:
-        for line in file:
-            word, category = (w.strip() for w in line.strip().split(","))
-            dict_liwc[word].append(category)
-            liwc_categories.add(category)
-    return dict_liwc, liwc_categories
-
-
-@functools.lru_cache
-def _parse_concreteness_file(path: str = "data/concreteness.txt") -> Mapping[str, float]:
-    dict_concreteness = {}
-    with open(path) as file:
-        next(file)  # Skip the first line.
-        for line in file:
-            word, _, concreteness_m, _, _, _, _, _, _ = line.split("	")
-            dict_concreteness[word] = float(concreteness_m)
-    return dict_concreteness
-
-
-def _get_levin_category(word: str, dict_levin_semantic: Mapping[str, Container[str]]) -> Sequence[str]:
-    return [category
-            for category, category_words in dict_levin_semantic.items()
-            if word in category_words]
-
-
-def _get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Sequence[str]:
-    return [category
-            for key_word, categories in dict_liwc.items()
-            if key_word == word or (key_word[-1] == "*" and word.startswith(key_word[:-1]))
-            for category in categories]
-
-
-def _neg_type_to_pos(neg_type: NegType) -> Literal["n", "v"]:
-    return "v" if neg_type == "v" else "n"  # noqa
-
-
-def _compute_wup_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
-    pos = _neg_type_to_pos(neg_type)
-    return max((synset_original.wup_similarity(synset_replacement)
-                for synset_original in wordnet.synsets(word_original, pos=pos)
-                for synset_replacement in wordnet.synsets(word_replacement, pos=pos)),
-               default=float("nan"))
-
-
-def _get_concreteness_score(word: str, dict_concreteness: Mapping[str, float]) -> float:
-    return dict_concreteness.get(word, float("nan"))
-
-
-@functools.lru_cache
 def _parse_levin_file(
         path: str = "data/levin_verbs.txt") -> Tuple[Mapping[str, Sequence[str]], Mapping[str, Sequence[str]]]:
     content = ""
@@ -181,6 +129,58 @@ def _parse_levin_dict(
             name_key = map_int_to_name[int_key]
             levin_semantic_broad[name_key].update(value)
     return levin_semantic_broad, levin_semantic_fine_grained, levin_alternations, levin_all
+
+
+def _get_levin_category(word: str, dict_levin_semantic: Mapping[str, Container[str]]) -> Sequence[str]:
+    return [category
+            for category, category_words in dict_levin_semantic.items()
+            if word in category_words]
+
+
+@functools.lru_cache
+def _parse_liwc_file(path: str = "data/LIWC.2015.all.txt") -> Tuple[Mapping[str, Sequence[str]], Set[str]]:
+    dict_liwc = defaultdict(list)
+    liwc_categories = set()
+    with open(path) as file:
+        for line in file:
+            word, category = (w.strip() for w in line.strip().split(","))
+            dict_liwc[word].append(category)
+            liwc_categories.add(category)
+    return dict_liwc, liwc_categories
+
+
+def _get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Sequence[str]:
+    return [category
+            for key_word, categories in dict_liwc.items()
+            if key_word == word or (key_word[-1] == "*" and word.startswith(key_word[:-1]))
+            for category in categories]
+
+
+@functools.lru_cache
+def _parse_concreteness_file(path: str = "data/concreteness.txt") -> Mapping[str, float]:
+    dict_concreteness = {}
+    with open(path) as file:
+        next(file)  # Skip the first line.
+        for line in file:
+            word, _, concreteness_m, _, _, _, _, _, _ = line.split("	")
+            dict_concreteness[word] = float(concreteness_m)
+    return dict_concreteness
+
+
+def _get_concreteness_score(word: str, dict_concreteness: Mapping[str, float]) -> float:
+    return dict_concreteness.get(word, float("nan"))
+
+
+def _neg_type_to_pos(neg_type: NegType) -> Literal["n", "v"]:
+    return "v" if neg_type == "v" else "n"  # noqa
+
+
+def _compute_wup_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
+    pos = _neg_type_to_pos(neg_type)
+    return max((synset_original.wup_similarity(synset_replacement)
+                for synset_original in wordnet.synsets(word_original, pos=pos)
+                for synset_replacement in wordnet.synsets(word_replacement, pos=pos)),
+               default=float("nan"))
 
 
 # sklearn-pandas doesn't support the new way (scikit-learn >= 1.1) some transformers output the features.
