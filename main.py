@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import ast
+import functools
 import itertools
 import json
 import string
@@ -94,6 +95,7 @@ def load_clip_results(path: str) -> pd.DataFrame:
     return df
 
 
+@functools.lru_cache
 def parse_liwc_file(path: str = "data/LIWC.2015.all.txt") -> Tuple[Mapping[str, Sequence[str]], Set[str]]:
     dict_liwc = defaultdict(list)
     liwc_categories = set()
@@ -105,6 +107,7 @@ def parse_liwc_file(path: str = "data/LIWC.2015.all.txt") -> Tuple[Mapping[str, 
     return dict_liwc, liwc_categories
 
 
+@functools.lru_cache
 def parse_concreteness_file(path: str = "data/concreteness.txt") -> Mapping[str, float]:
     dict_concreteness = {}
     with open(path) as file:
@@ -144,6 +147,7 @@ def get_concreteness_score(word: str, dict_concreteness: Mapping[str, float]) ->
     return dict_concreteness.get(word, float("nan"))
 
 
+@functools.lru_cache
 def parse_levin_file(
         path: str = "data/levin_verbs.txt") -> Tuple[Mapping[str, Sequence[str]], Mapping[str, Sequence[str]]]:
     content = ""
