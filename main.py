@@ -167,21 +167,23 @@ def parse_levin_file(
 
 def parse_levin_dict(levin_dict: Mapping[str, Sequence[str]],
                      path: str = "data/levin_semantic_broad.json",
-                     ) -> Tuple[Mapping[str, Container[str]], Mapping[str, Sequence[str]], Mapping[str, Sequence[str]]]:
+                     ) -> Tuple[Mapping[str, Container[str]], Mapping[str, Sequence[str]], Mapping[str, Sequence[str]],
+                                Mapping[str, Sequence[str]]]:
     with open(path) as file:
         map_int_to_name = {int(k): v for k, v in json.load(file).items()}
 
     levin_semantic_broad = defaultdict(set)
-    levin_semantic_fine_grained, levin_alternations = {}, {}
+    levin_semantic_fine_grained, levin_alternations, levin_all = {}, {}, {}
     for key, value in levin_dict.items():
         int_key = int(key.split(" ", maxsplit=1)[0].split(".", maxsplit=1)[0])
+        levin_all[key] = value
         if int_key <= 8:
             levin_alternations[key] = value
         else:
             levin_semantic_fine_grained[key] = value
             name_key = map_int_to_name[int_key]
             levin_semantic_broad[name_key].update(value)
-    return levin_semantic_broad, levin_semantic_fine_grained, levin_alternations
+    return levin_semantic_broad, levin_semantic_fine_grained, levin_alternations, levin_all
 
 
 # sklearn-pandas doesn't support the new way (scikit-learn >= 1.1) some transformers output the features.
@@ -256,7 +258,7 @@ def compute_features(clip_results: pd.DataFrame,
                                      "concreteness-replacement": [], "wup_similarity": []}
 
     levin_dict, _ = parse_levin_file()
-    levin_semantic_broad, _, _ = parse_levin_dict(levin_dict)
+    _, _, _, levin_all = parse_levin_dict(levin_dict)
     dict_liwc, _ = parse_liwc_file()
     dict_concreteness = parse_concreteness_file()
 
@@ -283,8 +285,8 @@ def compute_features(clip_results: pd.DataFrame,
             raise ValueError(f"Found empty word original or word replacement")
 
         if row.neg_type == "v":
-            levin_classes_w_original = get_levin_category(word_original, levin_semantic_broad)  # TODO: other Levin?
-            levin_classes_w_replacement = get_levin_category(word_replacement, levin_semantic_broad)
+            levin_classes_w_original = get_levin_category(word_original, levin_all)  # TODO: other Levin?
+            levin_classes_w_replacement = get_levin_category(word_replacement, levin_all)
         else:
             levin_classes_w_original, levin_classes_w_replacement = [], []
 
@@ -372,18 +374,18 @@ def evaluate(method_name: str, labels_test: np.ndarray, predicted: Sequence[int]
     print(f"Counter GT: {Counter(labels_test)}")
 
 
-def print_metrics(df: pd.DataFrame, feature_names: Sequence[str], features: np.ndarray) -> None:
-    main_feature_names = [feature_name.split("_")[0] for feature_name in feature_names]
-    print(f"Counter all labels:", Counter(df["label"].tolist()))
-    print(f"Data size:", len(df["index"].tolist()))
-    print(f"Features size:", len(feature_names), "--", Counter(main_feature_names))
+def print_metrics(clip_results: pd.DataFrame, features: pd.DataFrame) -> None:
+    main_feature_names = [feature_name.split("_")[0] for feature_name in features.columns]
+    print(f"Counter all labels:", Counter(clip_results["clip prediction"].tolist()))
+    print(f"Features size:", len(features.columns), "--", Counter(main_feature_names))
     print(f"Features shape:", features.shape)
 
     levin_dict, compressed_levin_dict = parse_levin_file()
-    levin_semantic_broad, levin_semantic_all, levin_alternations = parse_levin_dict(levin_dict)
+    levin_semantic_broad, levin_semantic_all, levin_alternations, levin_all = parse_levin_dict(levin_dict)
     print(f"--Levin semantic_broad nb classes:", len(levin_semantic_broad.keys()))
     print(f"--Levin semantic_all nb classes:", len(levin_semantic_all.keys()))
     print(f"--Levin alternations nb classes:", len(levin_alternations.keys()))
+    print(f"--Levin alternations + semantic_all nb classes:", len(levin_all.keys()))
 
     liwc_dict, liwc_categories = parse_liwc_file()
     print(f"LIWC total number of classes:", len(liwc_categories))
@@ -396,7 +398,7 @@ def compute_numeric_features(clip_results: pd.DataFrame, max_feature_count: Opti
     features = transform_features_to_numbers(
         raw_features, merge_original_and_replacement_features=merge_original_and_replacement_features)
     features = features.loc[:, ((features != 0).sum(0) >= feature_min_non_zero_values)]
-    # print_metrics(features, feature_names, features)
+    print_metrics(clip_results, features)
     return features, features_count, raw_features["clip-score-diff"] if do_regression else raw_features["label"]
 
 
