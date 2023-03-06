@@ -18,6 +18,8 @@ from nltk.stem import PorterStemmer, WordNetLemmatizer
 from sentence_transformers import SentenceTransformer, util
 from sklearn import svm
 from sklearn.impute import SimpleImputer
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardScaler
 from sklearn_pandas import DataFrameMapper
@@ -448,9 +450,11 @@ def analyse_coef_weights(features: np.ndarray, labels: np.ndarray,
 
 
 def compute_ols_summary(features: pd.DataFrame, labels: np.ndarray) -> None:
-    features = sm.add_constant(features)
+    # features = sm.add_constant(features)
 
-    summary = sm.OLS(labels, features).fit().summary()
+    model = sm.OLS(labels, features)
+    results = model.fit()
+    summary = results.summary()
     print(summary)
     print()
     print()
@@ -464,6 +468,17 @@ def compute_ols_summary(features: pd.DataFrame, labels: np.ndarray) -> None:
     print("Significant features:")
     print(df.to_string())
 
+def ridge_regression(features: pd.DataFrame, labels: np.ndarray) -> None:
+    clf = Ridge(alpha=0.1)
+    clf.fit(features, labels)
+    r_squared = clf.score(features, labels)
+    print(f"Ridge regression R^2: {r_squared}")
+    coef = clf.coef_
+    df = pd.DataFrame()
+    df['features'] = features.columns
+    df['coef'] = pd.Series(coef)
+    df = df.sort_values(by=["coef"], ascending=False)
+    print(df.to_string())
 
 def is_feature_binary(feature: np.ndarray):
     return feature.dtype == bool or (np.issubdtype(feature.dtype, np.integer) and set(np.unique(feature)) == {0, 1})
@@ -506,7 +521,8 @@ def main() -> None:
     features, features_count, labels = compute_numeric_features(clip_results,
                                                                 max_feature_count=1000 if args.debug else None)
     # coef_weights, coef_significance, coef_sign = analyse_coef_weights(features, labels, args.iterations)
-    compute_ols_summary(features, labels)
+    # compute_ols_summary(features, labels)
+    ridge_regression(features, labels)
 
     # print_sorted_coef_weights(coef_weights, coef_significance, coef_sign, feature_names, features_count)
 
