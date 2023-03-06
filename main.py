@@ -375,11 +375,7 @@ def evaluate(method_name: str, labels_test: np.ndarray, predicted: Sequence[int]
 
 
 def print_metrics(clip_results: pd.DataFrame, features: pd.DataFrame) -> None:
-    main_feature_names = [feature_name.split("_")[0] for feature_name in features.columns]
-    print(f"Counter all labels:", Counter(clip_results["clip prediction"].tolist()))
-    print(f"Features size:", len(features.columns), "--", Counter(main_feature_names))
-    print(f"Features shape:", features.shape)
-
+    print("Total classes before filtering:")
     levin_dict, compressed_levin_dict = parse_levin_file()
     levin_semantic_broad, levin_semantic_all, levin_alternations, levin_all = parse_levin_dict(levin_dict)
     print(f"--Levin semantic_broad nb classes:", len(levin_semantic_broad.keys()))
@@ -389,6 +385,14 @@ def print_metrics(clip_results: pd.DataFrame, features: pd.DataFrame) -> None:
 
     liwc_dict, liwc_categories = parse_liwc_file()
     print(f"LIWC total number of classes:", len(liwc_categories))
+
+    print()
+    print("Counts after filtering:")
+
+    main_feature_names = [feature_name.split("_")[0] for feature_name in features.columns]
+    print(f"Counter all labels:", Counter(clip_results["clip prediction"].tolist()))
+    print(f"Features size:", len(features.columns), "--", Counter(main_feature_names))
+    print(f"Features shape:", features.shape)
 
 
 def compute_numeric_features(clip_results: pd.DataFrame, max_feature_count: Optional[int] = None,
