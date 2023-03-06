@@ -20,8 +20,8 @@ REGRESSION_MODELS = {"ols", "ridge", "svm"}
 MODELS = CLASSIFICATION_MODELS | REGRESSION_MODELS
 
 
-def plot_coef_weights(coef_weights: np.ndarray, features: pd.DataFrame,
-                      path: str = "data/coef_importance.png", top_features: int = 5) -> None:
+def _plot_coef_weights_svm(coef_weights: np.ndarray, features: pd.DataFrame,
+                           path: str = "data/coef_importance.png", top_features: int = 5) -> None:
     coef = coef_weights.ravel()  # flatten array
     top_positive_coefficients = np.argsort(coef)[-top_features:]
     top_negative_coefficients = np.argsort(coef)[:top_features]
@@ -36,9 +36,9 @@ def plot_coef_weights(coef_weights: np.ndarray, features: pd.DataFrame,
 
 
 # https://www.kaggle.com/code/pierpaolo28/pima-indians-diabetes-database/notebook
-def print_sorted_coef_weights(coef: np.ndarray, coef_significance: np.ndarray, coef_sign: np.ndarray,
-                              features: pd.DataFrame, features_count: Sequence[int],
-                              output_path: str = "data/sorted_features.csv") -> None:
+def _print_sorted_coef_weights_svm(coef: np.ndarray, coef_significance: np.ndarray, coef_sign: np.ndarray,
+                                   features: pd.DataFrame, features_count: Sequence[int],
+                                   output_path: str = "data/sorted_features.csv") -> None:
     sorted_coefficients_idx = np.argsort(coef)[::-1]  # in descending order
     sorted_coefficients = [np.round(weight, 2) for weight in coef[sorted_coefficients_idx]]
 
@@ -55,24 +55,24 @@ def print_sorted_coef_weights(coef: np.ndarray, coef_significance: np.ndarray, c
     df.to_csv(output_path, index=False)
 
 
-def build_classifier() -> svm.LinearSVC:
+def _build_classifier_svm() -> svm.LinearSVC:
     return svm.LinearSVC(class_weight="balanced", max_iter=1_000_000)
 
 
-def classify_shuffled(features: pd.DataFrame, labels: np.ndarray, seed: int) -> np.ndarray:
+def _classify_shuffled_svm(features: pd.DataFrame, labels: np.ndarray, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
 
     features = features.sample(frac=1, random_state=rng)
 
-    clf = build_classifier()
+    clf = _build_classifier_svm()
     clf.fit(features, labels)
 
     return abs(clf.coef_.ravel())
 
 
-def analyze_coef_weights(features: pd.DataFrame, labels: np.ndarray,
-                         iterations: int = 10_000) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    clf = build_classifier()
+def _analyze_coef_weights_svm(features: pd.DataFrame, labels: np.ndarray,
+                              iterations: int = 10_000) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    clf = _build_classifier_svm()
 
     print("Computing the coefficients with the real features…")
     clf.fit(features, labels)
@@ -84,7 +84,7 @@ def analyze_coef_weights(features: pd.DataFrame, labels: np.ndarray,
 
     with Pool() as pool:
         list_shuffled_coef_weights = list(tqdm(
-            pool.imap_unordered(partial(classify_shuffled, features, labels), range(iterations)),
+            pool.imap_unordered(partial(_classify_shuffled_svm, features, labels), range(iterations)),
             total=iterations, desc="Computing the coefficients with shuffled columns"))
 
     coef_significance = np.array([sum(list_coef[i] <= coef for list_coef in list_shuffled_coef_weights)
@@ -93,7 +93,14 @@ def analyze_coef_weights(features: pd.DataFrame, labels: np.ndarray,
     return coef_weights, coef_significance, coef_sign
 
 
-def compute_ols_summary(features: pd.DataFrame, labels: np.ndarray, raw_features: pd.DataFrame) -> None:
+def compute_svm_regression(features: pd.DataFrame, labels: np.ndarray, features_count: Sequence[int],
+                           iterations: int) -> None:
+    coef_weights, coef_significance, coef_sign = _analyze_coef_weights_svm(features, labels, iterations)
+    _print_sorted_coef_weights_svm(coef_weights, coef_significance, coef_sign, features, features_count)
+    _plot_coef_weights_svm(coef_weights, features)
+
+
+def compute_ols_regression(features: pd.DataFrame, labels: np.ndarray, raw_features: pd.DataFrame) -> None:
     features = sm.add_constant(features)
 
     model = sm.OLS(labels, features)
@@ -129,7 +136,7 @@ def compute_ols_summary(features: pd.DataFrame, labels: np.ndarray, raw_features
             print(feature_name, "--", ", ".join(f"{word} ({freq})" for word, freq in counter.most_common(5)))
 
 
-def ridge_regression(features: pd.DataFrame, labels: np.ndarray) -> None:
+def compute_ridge_regression(features: pd.DataFrame, labels: np.ndarray) -> None:
     clf = Ridge(alpha=0.1)
     clf.fit(features, labels)
     r_squared = clf.score(features, labels)
@@ -189,13 +196,11 @@ def main() -> None:
     if args.model == "dominance-score":
         compute_dominance_score(features, labels)
     elif args.model == "ols":
-        compute_ols_summary(features, labels, raw_features)
+        compute_ols_regression(features, labels, raw_features)
     elif args.model == "ridge":
-        ridge_regression(features, labels)
+        compute_ridge_regression(features, labels)
     elif args.model == "svm":
-        coef_weights, coef_significance, coef_sign = analyze_coef_weights(features, labels, args.iterations)
-        print_sorted_coef_weights(coef_weights, coef_significance, coef_sign, features, features_count)
-        plot_coef_weights(coef_weights, features)
+        compute_svm_regression(features, labels, features_count, iterations=args.iterations)
     else:
         raise ValueError(f"Unknown model: {args.model} (should be in {MODELS}).")
 
