@@ -379,18 +379,6 @@ def print_sorted_coef_weights(coef: np.ndarray, coef_significance: np.ndarray, c
     df.to_csv(output_path, index=False)
 
 
-def evaluate(method_name: str, labels_test: np.ndarray, predicted: Sequence[int]) -> None:
-    accuracy = accuracy_score(labels_test, predicted) * 100
-    precision = precision_score(labels_test, predicted) * 100
-    recall = recall_score(labels_test, predicted) * 100
-    f1 = f1_score(labels_test, predicted) * 100
-    roc_auc = roc_auc_score(labels_test, predicted) * 100
-    print(f"Method {method_name}, A: {accuracy:.2f}, P: {precision:.2f}, R: {recall:.2f}, F1: {f1:.2f},"
-          f" ROC-AUC: {roc_auc:.2f}")
-    print(f"Counter predicted: {Counter(predicted)}")
-    print(f"Counter GT: {Counter(labels_test)}")
-
-
 def print_metrics(clip_results: pd.DataFrame, features: pd.DataFrame) -> None:
     print("Total classes before filtering:")
     levin_dict, compressed_levin_dict = parse_levin_file()
