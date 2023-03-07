@@ -83,13 +83,11 @@ def _load_clip_results(path: str) -> pd.DataFrame:
 
 
 @functools.lru_cache
-def _parse_levin_file(
-        path: str = "data/levin_verbs.txt",
-        path_semantic_broad: str = "data/levin_semantic_broad.json", verbose: bool = True,
-) -> Tuple[Mapping[str, Container[str]], Mapping[str, Sequence[str]], Mapping[str, Sequence[str]],
-           Mapping[str, Sequence[str]]]:
+def _parse_levin_file(path: str = "data/levin_verbs.txt",
+                      path_semantic_broad: str = "data/levin_semantic_broad.json",
+                      verbose: bool = True) -> Mapping[str, Container[str]]:
     content = ""
-    levin_dict = {}
+    map_class_name_to_words = {}
     with open(path) as file:
         for line in file:
             line = line.lstrip()
@@ -101,33 +99,32 @@ def _parse_levin_file(
                     content += " "
                 else:
                     if "-*-" not in content:
-                        levin_dict[class_name] = [w.lower() for w in content.split()]
+                        map_class_name_to_words[class_name] = {w.lower() for w in content.split()}
                     content = ""
         if "-*-" not in content:
-            levin_dict[class_name] = [w.lower() for w in content.split()]
+            map_class_name_to_words[class_name] = {w.lower() for w in content.split()}
 
     with open(path_semantic_broad) as file:
-        map_class_number_to_name = {int(number_str): name for number_str, name in json.load(file).items()}
+        map_class_number_to_broad_name = {int(number_str): name for number_str, name in json.load(file).items()}
 
-    levin_semantic_broad = defaultdict(set)
-    levin_semantic_fine_grained, levin_alternations, levin_all = {}, {}, {}
-    for class_name, words in levin_dict.items():
-        class_number = int(class_name.split(" ", maxsplit=1)[0].split(".", maxsplit=1)[0])
-        levin_all[class_name] = words
-        if class_number <= 8:
-            levin_alternations[class_name] = words
+    map_semantic_broad_class_name_to_words = defaultdict(set)
+    map_semantic_fine_grained_class_name_to_words = {}
+    map_alternation_class_names_to_words = {}
+    for class_name, words in map_class_name_to_words.items():
+        if (class_number := int(class_name.split(" ", maxsplit=1)[0].split(".", maxsplit=1)[0])) <= 8:
+            map_alternation_class_names_to_words[class_name] = words
         else:
-            levin_semantic_fine_grained[class_name] = words
-            class_name = map_class_number_to_name[class_number]
-            levin_semantic_broad[class_name].update(words)
+            map_semantic_fine_grained_class_name_to_words[class_name] = words
+            broad_class_name = map_class_number_to_broad_name[class_number]
+            map_semantic_broad_class_name_to_words[broad_class_name].update(words)
 
     if verbose:
-        print(f"--Levin semantic_broad nb classes:", len(levin_semantic_broad.keys()))
-        print(f"--Levin semantic_all nb classes:", len(levin_semantic_fine_grained.keys()))
-        print(f"--Levin alternations nb classes:", len(levin_alternations.keys()))
-        print(f"--Levin alternations + semantic_all nb classes:", len(levin_all.keys()))
+        print(f"--Levin semantic broad nb classes:", len(map_semantic_broad_class_name_to_words))
+        print(f"--Levin semantic fine-grained nb classes:", len(map_semantic_fine_grained_class_name_to_words))
+        print(f"--Levin alternations nb classes:", len(map_alternation_class_names_to_words))
+        print(f"--Levin total nb classes:", len(map_class_name_to_words))
 
-    return levin_semantic_broad, levin_semantic_fine_grained, levin_alternations, levin_all
+    return map_class_name_to_words
 
 
 def _get_levin_category(word: str, dict_levin_semantic: Mapping[str, Container[str]]) -> Sequence[str]:
@@ -314,7 +311,7 @@ def _compute_features(clip_results: pd.DataFrame,
                                      "nb-synsets-original": [], "nb-synsets-replacement": [], "text_similarity": [],
                                      "wup_similarity": [], "lch_similarity": [], "path_similarity": []}
 
-    _, _, _, levin_all = _parse_levin_file()
+    dict_levin = _parse_levin_file()
     dict_liwc = _parse_liwc_file()
     dict_concreteness = _parse_concreteness_file()
 
@@ -344,8 +341,8 @@ def _compute_features(clip_results: pd.DataFrame,
             raise ValueError(f"Found empty word original or word replacement")
 
         if row.neg_type == "v":
-            levin_classes_w_original = _get_levin_category(word_original, levin_all)
-            levin_classes_w_replacement = _get_levin_category(word_replacement, levin_all)
+            levin_classes_w_original = _get_levin_category(word_original, dict_levin)
+            levin_classes_w_replacement = _get_levin_category(word_replacement, dict_levin)
         else:
             levin_classes_w_original, levin_classes_w_replacement = [], []
 
