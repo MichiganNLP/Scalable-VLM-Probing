@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import itertools
 import json
-import string
+import re
 from collections import Counter
 from typing import Iterable
 
@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 def load_laion_texts() -> Iterable[str]:
     for instance in load_dataset("laion/laion400m", split="train", streaming=True):
         if text := instance["TEXT"]:
-            yield text.lower().translate(str.maketrans("", "", string.punctuation))
+            yield re.sub(r'[^a-zA-Z ]', ' ', text.lower()).replace("'", '')
 
 
 def main() -> None:
