@@ -3,8 +3,7 @@ matplotlib==3.7.1
 nltk==3.8.1
 numpy==1.24.2
 pandas==1.5.3
-pyarrow==11.0.0
-
+pyarrow==11.0.0  # To read parquet files.
 scikit-learn==1.2.1
 sentence-transformers==2.2.2
 sklearn-pandas==2.2.0
@@ -13,6 +12,3 @@ torch==1.13.1
 tqdm==4.65.0
 transformers==4.26.1
 word_forms==2.1.0
-
-
-
