@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import ast
 import functools
 import itertools
@@ -84,50 +86,43 @@ def _load_clip_results(path: str) -> pd.DataFrame:
 
 @functools.lru_cache
 def _parse_levin_file(
-        path: str = "data/levin_verbs.txt") -> Tuple[Mapping[str, Sequence[str]], Mapping[str, Sequence[str]]]:
+        path: str = "data/levin_verbs.txt",
+        path_semantic_broad: str = "data/levin_semantic_broad.json",
+) -> Tuple[Mapping[str, Container[str]], Mapping[str, Sequence[str]], Mapping[str, Sequence[str]],
+           Mapping[str, Sequence[str]]]:
     content = ""
     levin_dict = {}
-    compressed_levin_dict = defaultdict(list)
     with open(path) as file:
         for line in file:
             line = line.lstrip()
             if line and line[0].isnumeric():
-                key = " ".join(line.split())
-                key_compressed = key.split(" ")[0].split(".")[0]
+                class_name = " ".join(line.split())
             else:
                 if line:
                     content += line.replace("\r\n", "").rstrip()
                     content += " "
                 else:
                     if "-*-" not in content:
-                        levin_dict[key] = [x.lower() for x in content.split()]
-                        compressed_levin_dict[key_compressed].extend(levin_dict[key])
+                        levin_dict[class_name] = [w.lower() for w in content.split()]
                     content = ""
         if "-*-" not in content:
-            levin_dict[key] = [x.lower() for x in content.split()]
-            compressed_levin_dict[key_compressed].extend(levin_dict[key])
-    return levin_dict, compressed_levin_dict
+            levin_dict[class_name] = [w.lower() for w in content.split()]
 
-
-def _parse_levin_dict(
-        levin_dict: Mapping[str, Sequence[str]],
-        path: str = "data/levin_semantic_broad.json",
-) -> Tuple[Mapping[str, Container[str]], Mapping[str, Sequence[str]], Mapping[str, Sequence[str]],
-           Mapping[str, Sequence[str]]]:
-    with open(path) as file:
-        map_int_to_name = {int(k): v for k, v in json.load(file).items()}
+    with open(path_semantic_broad) as file:
+        map_class_number_to_name = {int(number_str): name for number_str, name in json.load(file).items()}
 
     levin_semantic_broad = defaultdict(set)
     levin_semantic_fine_grained, levin_alternations, levin_all = {}, {}, {}
-    for key, value in levin_dict.items():
-        int_key = int(key.split(" ", maxsplit=1)[0].split(".", maxsplit=1)[0])
-        levin_all[key] = value
-        if int_key <= 8:
-            levin_alternations[key] = value
+    for class_name, words in levin_dict.items():
+        class_number = int(class_name.split(" ", maxsplit=1)[0].split(".", maxsplit=1)[0])
+        levin_all[class_name] = words
+        if class_number <= 8:
+            levin_alternations[class_name] = words
         else:
-            levin_semantic_fine_grained[key] = value
-            name_key = map_int_to_name[int_key]
-            levin_semantic_broad[name_key].update(value)
+            levin_semantic_fine_grained[class_name] = words
+            class_name = map_class_number_to_name[class_number]
+            levin_semantic_broad[class_name].update(words)
+
     return levin_semantic_broad, levin_semantic_fine_grained, levin_alternations, levin_all
 
 
@@ -136,25 +131,26 @@ def _get_levin_category(word: str, dict_levin_semantic: Mapping[str, Container[s
             for category, category_words in dict_levin_semantic.items()
             if word in category_words]
 
-def _get_nb_synsets(word: str, neg_type: NegType) -> int:
+
+def _get_nb_synsets(word: str, neg_type: NegType) -> int:  # noqa
     # pos = _neg_type_to_pos(neg_type)
     # synsets = wordnet.synsets(word, pos=pos)
-    synsets = wordnet.synsets(word) #total nb of senses
+    synsets = wordnet.synsets(word)  # total nb of senses
     return len(synsets)
 
-def _get_hypernyms(word:str, neg_type: NegType) -> Sequence[str]:
+
+def _get_hypernyms(word: str, neg_type: NegType) -> Sequence[str] | float:
     pos = _neg_type_to_pos(neg_type)
     synsets = wordnet.synsets(word, pos=pos)
     if not synsets:
-        return "nan" # FIXME: or word?
+        return float("nan")  # FIXME: or word?
     hypernyms = synsets[0].hypernyms()
     if hypernyms:
-        # broad_semantic_categ = hypernyms[0]._lexname.split(".")[-1]
-        broad_semantic_categ = hypernyms[0]._lemma_names[0]
-    else:
-        # broad_semantic_categ = synsets[0]._lexname.split(".")[-1]
-        broad_semantic_categ = synsets[0]._lemma_names[0]
-    return [broad_semantic_categ]
+        synsets = hypernyms
+    # broad_semantic_category = synsets[0]._lexname.split(".")[-1]
+    broad_semantic_category = synsets[0]._lemma_names[0]
+    return [broad_semantic_category]
+
 
 @functools.lru_cache
 def _parse_liwc_file(path: str = "data/LIWC.2015.all.txt") -> Tuple[Mapping[str, Sequence[str]], Set[str]]:
@@ -201,6 +197,7 @@ def _compute_wup_similarity(word_original: str, word_replacement: str, neg_type:
                 for synset_replacement in wordnet.synsets(word_replacement, pos=pos)),
                default=float("nan"))
 
+
 def _compute_lch_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
     pos = _neg_type_to_pos(neg_type)
     return max((synset_original.lch_similarity(synset_replacement)
@@ -208,12 +205,14 @@ def _compute_lch_similarity(word_original: str, word_replacement: str, neg_type:
                 for synset_replacement in wordnet.synsets(word_replacement, pos=pos)),
                default=float("nan"))
 
+
 def _compute_path_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
     pos = _neg_type_to_pos(neg_type)
     return max((synset_original.path_similarity(synset_replacement)
                 for synset_original in wordnet.synsets(word_original, pos=pos)
                 for synset_replacement in wordnet.synsets(word_replacement, pos=pos)),
                default=float("nan"))
+
 
 # sklearn-pandas doesn't support the new way (scikit-learn >= 1.1) some transformers output the features.
 # See https://github.com/scikit-learn-contrib/sklearn-pandas/pull/248
@@ -307,11 +306,10 @@ def _compute_features(clip_results: pd.DataFrame,
                                      "WordNet-original": [], "WordNet-replacement": [],
                                      "frequency-original": [], "frequency-replacement": [],
                                      "concreteness-original": [], "concreteness-replacement": [],
-                                     "nb-synsets-original":[], "nb-synsets-replacement": [], "text_similarity": [],
+                                     "nb-synsets-original": [], "nb-synsets-replacement": [], "text_similarity": [],
                                      "wup_similarity": [], "lch_similarity": [], "path_similarity": []}
 
-    levin_dict, _ = _parse_levin_file()
-    _, _, _, levin_all = _parse_levin_dict(levin_dict)
+    _, _, _, levin_all = _parse_levin_file()
     dict_liwc, _ = _parse_liwc_file()
     dict_concreteness = _parse_concreteness_file()
 
@@ -324,7 +322,7 @@ def _compute_features(clip_results: pd.DataFrame,
     dict_features["label"] = clip_results["clip prediction"]
     dict_features["clip-score-diff"] = clip_results.clip_score_diff
 
-    with open('data/words_counter_LAION.json') as json_file:
+    with open("data/words_counter_LAION.json") as json_file:
         words_counter_LAION = json.load(json_file)
 
     embedded_sentences = text_model.encode(sentences, show_progress_bar=True)
@@ -350,7 +348,8 @@ def _compute_features(clip_results: pd.DataFrame,
         liwc_category_w_replacement = _get_liwc_category(word_replacement, dict_liwc)
 
         frequency_w_original = words_counter_LAION[word_original] if word_original in words_counter_LAION else 0
-        frequency_w_replacement = words_counter_LAION[word_replacement] if word_replacement in words_counter_LAION else 0
+        frequency_w_replacement = words_counter_LAION[
+            word_replacement] if word_replacement in words_counter_LAION else 0
 
         concreteness_w_original = _get_concreteness_score(word_original, dict_concreteness)
         concreteness_w_replacement = _get_concreteness_score(word_replacement, dict_concreteness)
@@ -362,8 +361,8 @@ def _compute_features(clip_results: pd.DataFrame,
         nb_synsets_word_original = _get_nb_synsets(word_original, row.neg_type)
         nb_synsets_word_replacement = _get_nb_synsets(word_replacement, row.neg_type)
 
-        wordnet_semantic_categ_original = _get_hypernyms(word_original, row.neg_type)
-        wordnet_semantic_categ_replacement = _get_hypernyms(word_replacement, row.neg_type)
+        wordnet_semantic_category_original = _get_hypernyms(word_original, row.neg_type)
+        wordnet_semantic_category_replacement = _get_hypernyms(word_replacement, row.neg_type)
 
         dict_features["word_original"].append(word_original)
         dict_features["word_replacement"].append(word_replacement)
@@ -372,8 +371,8 @@ def _compute_features(clip_results: pd.DataFrame,
         dict_features["Levin-replacement"].append(levin_classes_w_replacement)
         dict_features["LIWC-original"].append(liwc_category_w_original)
         dict_features["LIWC-replacement"].append(liwc_category_w_replacement)
-        dict_features["WordNet-original"].append(wordnet_semantic_categ_original)
-        dict_features["WordNet-replacement"].append(wordnet_semantic_categ_replacement)
+        dict_features["WordNet-original"].append(wordnet_semantic_category_original)
+        dict_features["WordNet-replacement"].append(wordnet_semantic_category_replacement)
         dict_features["frequency-original"].append(frequency_w_original)
         dict_features["frequency-replacement"].append(frequency_w_replacement)
         dict_features["concreteness-original"].append(concreteness_w_original)
@@ -383,7 +382,6 @@ def _compute_features(clip_results: pd.DataFrame,
         dict_features["wup_similarity"].append(wup_similarity)
         dict_features["lch_similarity"].append(lch_similarity)
         dict_features["path_similarity"].append(path_similarity)
-
 
     embedded_original_words = text_model.encode(dict_features["word_original"], show_progress_bar=True)
     embedded_replacement_words = text_model.encode(dict_features["word_replacement"], show_progress_bar=True)
@@ -414,8 +412,7 @@ def _compute_features(clip_results: pd.DataFrame,
 def _describe_features(clip_results: pd.DataFrame, features: pd.DataFrame) -> None:
     print("Total classes before filtering:")
 
-    levin_dict, compressed_levin_dict = _parse_levin_file()
-    levin_semantic_broad, levin_semantic_all, levin_alternations, levin_all = _parse_levin_dict(levin_dict)
+    levin_semantic_broad, levin_semantic_all, levin_alternations, levin_all = _parse_levin_file()
     print(f"--Levin semantic_broad nb classes:", len(levin_semantic_broad.keys()))
     print(f"--Levin semantic_all nb classes:", len(levin_semantic_all.keys()))
     print(f"--Levin alternations nb classes:", len(levin_alternations.keys()))

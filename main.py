@@ -175,6 +175,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default="ols", choices=MODELS)
     parser.add_argument("--input-path", default="data/merged.csv")
     parser.add_argument("--feature-min-non-zero-values", type=int, default=50)
+    parser.add_argument("--merge-original-and-replacement-features", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--iterations", type=int, default=10_000, help="Only applies to the SVM model.")
     return parser.parse_args()
@@ -183,16 +184,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    max_feature_count = 1000 if args.debug else None
-
-    do_regression = args.model in REGRESSION_MODELS
-    # merge_original_and_replacement_features = do_regression#TODO: WHY?
-    merge_original_and_replacement_features = False
-
     raw_features, features, features_count, labels = load_features(
-        path=args.input_path, max_feature_count=max_feature_count,
-        merge_original_and_replacement_features=merge_original_and_replacement_features, do_regression=do_regression,
-        feature_min_non_zero_values=args.feature_min_non_zero_values)
+        path=args.input_path, max_feature_count=1000 if args.debug else None,
+        merge_original_and_replacement_features=args.merge_original_and_replacement_features,
+        do_regression=args.model in REGRESSION_MODELS, feature_min_non_zero_values=args.feature_min_non_zero_values)
 
     if args.model == "dominance-score":
         compute_dominance_score(features, labels)

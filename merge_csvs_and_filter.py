@@ -29,5 +29,5 @@ def main() -> None:
     print(result.to_csv())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
