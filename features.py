@@ -4,7 +4,7 @@ import itertools
 import json
 import string
 from collections import Counter, defaultdict
-from typing import Any, Container, Dict, Iterable, Literal, Mapping, Optional, Sequence, Set, Tuple, get_args
+from typing import Any, Container, Dict, Iterable, Literal, Mapping, Optional, Sequence, Tuple, get_args
 
 import numpy as np
 import pandas as pd
@@ -85,7 +85,7 @@ def _load_clip_results(path: str) -> pd.DataFrame:
 @functools.lru_cache
 def _parse_levin_file(
         path: str = "data/levin_verbs.txt",
-        path_semantic_broad: str = "data/levin_semantic_broad.json",
+        path_semantic_broad: str = "data/levin_semantic_broad.json", verbose: bool = True,
 ) -> Tuple[Mapping[str, Container[str]], Mapping[str, Sequence[str]], Mapping[str, Sequence[str]],
            Mapping[str, Sequence[str]]]:
     content = ""
@@ -121,6 +121,12 @@ def _parse_levin_file(
             class_name = map_class_number_to_name[class_number]
             levin_semantic_broad[class_name].update(words)
 
+    if verbose:
+        print(f"--Levin semantic_broad nb classes:", len(levin_semantic_broad.keys()))
+        print(f"--Levin semantic_all nb classes:", len(levin_semantic_fine_grained.keys()))
+        print(f"--Levin alternations nb classes:", len(levin_alternations.keys()))
+        print(f"--Levin alternations + semantic_all nb classes:", len(levin_all.keys()))
+
     return levin_semantic_broad, levin_semantic_fine_grained, levin_alternations, levin_all
 
 
@@ -133,7 +139,7 @@ def _get_levin_category(word: str, dict_levin_semantic: Mapping[str, Container[s
 def _get_nb_synsets(word: str, neg_type: NegType) -> int:  # noqa
     # pos = _neg_type_to_pos(neg_type)
     # synsets = wordnet.synsets(word, pos=pos)
-    synsets = wordnet.synsets(word)  # total nb of senses
+    synsets = wordnet.synsets(word)
     return len(synsets)
 
 
@@ -142,21 +148,25 @@ def _get_hypernyms(word: str, neg_type: NegType) -> Sequence[str]:
     if not (synsets := wordnet.synsets(word, pos=pos)):
         return "nan"  # FIXME: or `return [word]`?
     synsets = synsets[0].hypernyms() or synsets
-    # broad_semantic_category = synsets[0]._lexname.split(".")[-1]
     broad_semantic_category = synsets[0]._lemma_names[0]
     return [broad_semantic_category]
 
 
 @functools.lru_cache
-def _parse_liwc_file(path: str = "data/LIWC.2015.all.txt") -> Tuple[Mapping[str, Sequence[str]], Set[str]]:
+def _parse_liwc_file(path: str = "data/LIWC.2015.all.txt", verbose: bool = True) -> Mapping[str, Sequence[str]]:
     dict_liwc = defaultdict(list)
     liwc_categories = set()
+
     with open(path) as file:
         for line in file:
             word, category = (w.strip() for w in line.strip().split(","))
             dict_liwc[word].append(category)
             liwc_categories.add(category)
-    return dict_liwc, liwc_categories
+
+    if verbose:
+        print(f"Total number of LIWC categories:", len(liwc_categories))
+
+    return dict_liwc
 
 
 def _get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Sequence[str]:
@@ -305,7 +315,7 @@ def _compute_features(clip_results: pd.DataFrame,
                                      "wup_similarity": [], "lch_similarity": [], "path_similarity": []}
 
     _, _, _, levin_all = _parse_levin_file()
-    dict_liwc, _ = _parse_liwc_file()
+    dict_liwc = _parse_liwc_file()
     dict_concreteness = _parse_concreteness_file()
 
     sentences = clip_results.sentence.array
@@ -405,27 +415,10 @@ def _compute_features(clip_results: pd.DataFrame,
 
 
 def _describe_features(clip_results: pd.DataFrame, features: pd.DataFrame) -> None:
-    print("Total classes before filtering:")
-
-    levin_semantic_broad, levin_semantic_all, levin_alternations, levin_all = _parse_levin_file()
-    print(f"--Levin semantic_broad nb classes:", len(levin_semantic_broad.keys()))
-    print(f"--Levin semantic_all nb classes:", len(levin_semantic_all.keys()))
-    print(f"--Levin alternations nb classes:", len(levin_alternations.keys()))
-    print(f"--Levin alternations + semantic_all nb classes:", len(levin_all.keys()))
-
-    liwc_dict, liwc_categories = _parse_liwc_file()
-    print(f"LIWC total number of classes:", len(liwc_categories))
-
-    print()
-    print("Counts after filtering:")
-
     main_feature_names = [feature_name.split("_")[0] for feature_name in features.columns]
     print(f"Counter all labels:", Counter(clip_results["clip prediction"].tolist()))
     print(f"Features size:", len(features.columns), "--", Counter(main_feature_names))
     print(f"Features shape:", features.shape)
-
-    print()
-    print()
 
 
 def _compute_numeric_features(clip_results: pd.DataFrame, max_feature_count: Optional[int] = None,
