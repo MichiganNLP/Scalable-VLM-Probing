@@ -4,7 +4,7 @@ import itertools
 import json
 import string
 from collections import Counter, defaultdict
-from typing import Any, Container, Dict, Iterable, Literal, Mapping, Optional, Sequence, Tuple, get_args
+from typing import Any, Collection, Dict, Iterable, Literal, Mapping, Optional, Sequence, Tuple, get_args
 
 import numpy as np
 import pandas as pd
@@ -85,7 +85,7 @@ def _load_clip_results(path: str) -> pd.DataFrame:
 @functools.lru_cache
 def _parse_levin_file(path: str = "data/levin_verbs.txt",
                       path_semantic_broad: str = "data/levin_semantic_broad.json",
-                      verbose: bool = True) -> Mapping[str, Container[str]]:
+                      verbose: bool = True) -> Mapping[str, Collection[str]]:
     content = ""
     map_class_name_to_words = {}
     with open(path) as file:
@@ -107,30 +107,45 @@ def _parse_levin_file(path: str = "data/levin_verbs.txt",
     with open(path_semantic_broad) as file:
         map_class_number_to_broad_name = {int(number_str): name for number_str, name in json.load(file).items()}
 
-    map_semantic_broad_class_name_to_words = defaultdict(set)
-    map_semantic_fine_grained_class_name_to_words = {}
-    map_alternation_class_names_to_words = {}
+    # map_word_to_semantic_broad_class_names = defaultdict(set)
+    # map_word_to_semantic_fine_grained_class_names = defaultdict(set)
+    # map_word_to_alternation_class_names = defaultdict(set)
+    map_word_to_class_names = defaultdict(set)
+
+    semantic_broad_classes = set()
+    semantic_fine_grained_class_count = 0
+    alternation_class_count = 0
+
     for class_name, words in map_class_name_to_words.items():
+        for word in words:
+            map_word_to_class_names[word].add(class_name)
+
         if (class_number := int(class_name.split(" ", maxsplit=1)[0].split(".", maxsplit=1)[0])) <= 8:
-            map_alternation_class_names_to_words[class_name] = words
+            alternation_class_count += 1
+
+            # for word in words:
+            #     map_word_to_alternation_class_names[word].add(class_name)
         else:
-            map_semantic_fine_grained_class_name_to_words[class_name] = words
+            semantic_fine_grained_class_count += 1
+
             broad_class_name = map_class_number_to_broad_name[class_number]
-            map_semantic_broad_class_name_to_words[broad_class_name].update(words)
+            semantic_broad_classes.add(broad_class_name)
+
+            # for word in words:
+            #     map_word_to_semantic_fine_grained_class_names[word].add(class_name)
+            #     map_word_to_semantic_broad_class_names[broad_class_name].update(words)
 
     if verbose:
-        print(f"--Levin semantic broad nb classes:", len(map_semantic_broad_class_name_to_words))
-        print(f"--Levin semantic fine-grained nb classes:", len(map_semantic_fine_grained_class_name_to_words))
-        print(f"--Levin alternations nb classes:", len(map_alternation_class_names_to_words))
+        print(f"--Levin semantic broad nb classes:", len(semantic_broad_classes))
+        print(f"--Levin semantic fine-grained nb classes:", semantic_fine_grained_class_count)
+        print(f"--Levin alternations nb classes:", alternation_class_count)
         print(f"--Levin total nb classes:", len(map_class_name_to_words))
 
-    return map_class_name_to_words
+    return map_word_to_class_names
 
 
-def _get_levin_category(word: str, dict_levin_semantic: Mapping[str, Container[str]]) -> Sequence[str]:
-    return [category
-            for category, category_words in dict_levin_semantic.items()
-            if word in category_words]
+def _get_levin_category(word: str, dict_levin: Mapping[str, Collection[str]]) -> Sequence[str]:
+    return list(dict_levin[word])
 
 
 def _get_nb_synsets(word: str, neg_type: NegType) -> int:  # noqa
