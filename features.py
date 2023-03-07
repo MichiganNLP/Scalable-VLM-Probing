@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import ast
 import functools
 import itertools
@@ -139,14 +137,11 @@ def _get_nb_synsets(word: str, neg_type: NegType) -> int:  # noqa
     return len(synsets)
 
 
-def _get_hypernyms(word: str, neg_type: NegType) -> Sequence[str] | float:
+def _get_hypernyms(word: str, neg_type: NegType) -> Sequence[str]:
     pos = _neg_type_to_pos(neg_type)
-    synsets = wordnet.synsets(word, pos=pos)
-    if not synsets:
-        return float("nan")  # FIXME: or word?
-    hypernyms = synsets[0].hypernyms()
-    if hypernyms:
-        synsets = hypernyms
+    if not (synsets := wordnet.synsets(word, pos=pos)):
+        return "nan"  # FIXME: or `return [word]`?
+    synsets = synsets[0].hypernyms() or synsets
     # broad_semantic_category = synsets[0]._lexname.split(".")[-1]
     broad_semantic_category = synsets[0]._lemma_names[0]
     return [broad_semantic_category]
