@@ -1,9 +1,10 @@
+datasets==2.10.1
 lxml==4.9.2  # For converting the statsmodels table to a DataFrame.
 matplotlib==3.7.1
 nltk==3.8.1
 numpy==1.24.2
 pandas==1.5.3
-pyarrow==11.0.0  # To read parquet files.
+pyarrow==11.0.0  # To read parquet files. Not sure if still needed if using `datasets`.
 scikit-learn==1.2.1
 sentence-transformers==2.2.2
 sklearn-pandas==2.2.0
