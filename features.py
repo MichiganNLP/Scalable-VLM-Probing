@@ -4,8 +4,7 @@ import itertools
 import json
 import string
 from collections import Counter, defaultdict
-from typing import Any, Collection, Dict, Iterable, Literal, Mapping, MutableSequence, Optional, Sequence, Tuple, \
-    get_args
+from typing import Collection, Iterable, Literal, Mapping, MutableSequence, Optional, Sequence, Tuple, get_args
 
 import numpy as np
 import pandas as pd
@@ -15,7 +14,6 @@ from sentence_transformers import SentenceTransformer, util
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardScaler
 from sklearn_pandas import DataFrameMapper
-from tqdm.auto import tqdm
 
 NegType = Literal["s", "v", "o"]
 Triplet = Tuple[str, str, str]
@@ -249,106 +247,107 @@ def _compute_path_similarity(word_original: str, word_replacement: str, neg_type
                default=float("nan"))
 
 
-def _get_original_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: NegType) -> Tuple[str, str]:
-    i = VALID_NEG_TYPES.index(neg_type)
-    return pos_triplet[i], neg_triplet[i]
+def _get_changed_word(triplet: Triplet, neg_type: NegType) -> str:
+    return triplet[VALID_NEG_TYPES.index(neg_type)]
 
 
 def _compute_features(clip_results: pd.DataFrame, do_regression: bool = True,
+                      feature_deny_list: Collection[str] = frozenset(),
                       max_feature_count: Optional[int] = None) -> Tuple[pd.DataFrame, np.ndarray]:
+    print("Computing all the features…")
+
     if max_feature_count:
         clip_results = clip_results[:max_feature_count]
 
-    dict_features: Dict[str, Any] = defaultdict(list)
+    df = clip_results.copy()
 
-    dict_levin = _parse_levin_file()
-    dict_liwc = _parse_liwc_file()
-    dict_concreteness = _parse_concreteness_file()
+    df["word_original"] = df.apply(lambda row: _get_changed_word(row.pos_triplet, row.neg_type), axis=1)
+    df["word_replacement"] = df.apply(lambda row: _get_changed_word(row.neg_triplet, row.neg_type), axis=1)
 
-    with open(PATH_WORD_FREQUENCIES) as json_file:
-        word_frequencies = json.load(json_file)
+    if "text_similarity" not in feature_deny_list:
+        print("Computing the text similarity…")
 
-    sentences = clip_results.sentence.array
-    negative_sentences = clip_results.neg_sentence.array
+        embedded_sentences = text_model.encode(df.sentence.array, show_progress_bar=True)
+        embedded_neg_sentences = text_model.encode(df.neg_sentence.array, show_progress_bar=True)
 
-    dict_features["sent"] = sentences
-    dict_features["n_sent"] = negative_sentences
+        df["text_similarity"] = util.pairwise_cos_sim(embedded_sentences, embedded_neg_sentences)
+        # We set the similarity to NaN for empty sentences:
+        df.loc[[s == "" for s in df.neg_sentence], "text_similarity"] = float("nan")
 
-    dict_features["neg_type"] = clip_results.neg_type
+    if "word_similarity" not in feature_deny_list:
+        print("Computing the word similarity…")
 
-    dict_features["label"] = clip_results["clip prediction"]
-    dict_features["clip-score-diff"] = clip_results.clip_score_diff
+        embedded_original_words = text_model.encode(df.word_original.array, show_progress_bar=True)
+        embedded_replacement_words = text_model.encode(df.word_replacement.array, show_progress_bar=True)
 
-    embedded_sentences = text_model.encode(sentences, show_progress_bar=True)
-    embedded_neg_sentences = text_model.encode(negative_sentences, show_progress_bar=True)
+        df["word_similarity"] = util.pairwise_cos_sim(embedded_original_words, embedded_replacement_words)
 
-    dict_features["text_similarity"] = util.pairwise_cos_sim(embedded_sentences, embedded_neg_sentences)
-    # We set the similarity to NaN for empty sentences:
-    dict_features["text_similarity"][[s == "" for s in negative_sentences]] = float("nan")
+    if "Levin" not in feature_deny_list:
+        dict_levin = _parse_levin_file()
 
-    for _, row in tqdm(clip_results.iterrows(), desc="Computing the features", total=len(clip_results)):
-        word_original, word_replacement = _get_original_word(row.pos_triplet, row.neg_triplet, row.neg_type)
+        df["levin-original"] = df.apply(
+            lambda row: _get_levin_category(row.word_original, dict_levin) if row.neg_type == "v" else [], axis=1)
+        df["levin-replacement"] = df.apply(
+            lambda row: _get_levin_category(row.word_replacement, dict_levin) if row.neg_type == "v" else [], axis=1)
 
-        if not word_replacement or not word_original:
-            raise ValueError(f"Found empty word original or word replacement")
+    if "LIWC" not in feature_deny_list:
+        dict_liwc = _parse_liwc_file()
 
-        if row.neg_type == "v":
-            levin_classes_w_original = _get_levin_category(word_original, dict_levin)
-            levin_classes_w_replacement = _get_levin_category(word_replacement, dict_levin)
-        else:
-            levin_classes_w_original, levin_classes_w_replacement = [], []
+        df["LIWC-original"] = df.word_original.apply(lambda w: _get_liwc_category(w, dict_liwc))
+        df["LIWC-replacement"] = df.word_replacement.apply(lambda w: _get_liwc_category(w, dict_liwc))
 
-        liwc_category_w_original = _get_liwc_category(word_original, dict_liwc)
-        liwc_category_w_replacement = _get_liwc_category(word_replacement, dict_liwc)
+    if "hypernym" not in feature_deny_list:
+        print("Computing the hypernyms…", end="")
+        df["hypernym-original"] = df.apply(lambda row: _get_hypernyms(row.word_original, row.neg_type), axis=1)
+        df["hypernym-replacement"] = df.apply(lambda row: _get_hypernyms(row.word_replacement, row.neg_type), axis=1)
+        print(" ✓")
 
-        frequency_w_original = word_frequencies.get(word_original, 0)
-        frequency_w_replacement = word_frequencies.get(word_replacement, 0)
+    if "frequency" not in feature_deny_list:
+        with open(PATH_WORD_FREQUENCIES) as json_file:
+            word_frequencies = json.load(json_file)
 
-        concreteness_w_original = _get_concreteness_score(word_original, dict_concreteness)
-        concreteness_w_replacement = _get_concreteness_score(word_replacement, dict_concreteness)
+        df["frequency-original"] = df.word_original.apply(lambda w: word_frequencies.get(w, 0))
+        df["frequency-replacement"] = df.word_replacement.apply(lambda w: word_frequencies.get(w, 0))
 
-        # wup_similarity = _compute_wup_similarity(word_original, word_replacement, neg_type=row.neg_type)
-        lch_similarity = _compute_lch_similarity(word_original, word_replacement, neg_type=row.neg_type)
-        # path_similarity = _compute_path_similarity(word_original, word_replacement, neg_type=row.neg_type)
-        # wup_similarity, path_similarity = float("nan"), float("nan")
+        df["frequency-change"] = df["frequency-original"] - df["frequency-replacement"]
 
-        nb_synsets_word_original = _get_nb_synsets(word_original, row.neg_type)
-        nb_synsets_word_replacement = _get_nb_synsets(word_replacement, row.neg_type)
+    if "concreteness" not in feature_deny_list:
+        dict_concreteness = _parse_concreteness_file()
 
-        hypernym_original = _get_hypernyms(word_original, row.neg_type)
-        hypernym_replacement = _get_hypernyms(word_replacement, row.neg_type)
+        df["concreteness-original"] = df.word_original.apply(
+            lambda w: _get_concreteness_score(w, dict_concreteness))
+        df["concreteness-replacement"] = df.word_replacement.apply(
+            lambda w: _get_concreteness_score(w, dict_concreteness))
 
-        dict_features["word_original"].append(word_original)
-        dict_features["word_replacement"].append(word_replacement)
-        dict_features["Levin-original"].append(levin_classes_w_original)
-        dict_features["Levin-replacement"].append(levin_classes_w_replacement)
-        dict_features["LIWC-original"].append(liwc_category_w_original)
-        dict_features["LIWC-replacement"].append(liwc_category_w_replacement)
-        dict_features["hypernym-original"].append(hypernym_original)
-        dict_features["hypernym-replacement"].append(hypernym_replacement)
-        dict_features["frequency-original"].append(frequency_w_original)
-        dict_features["frequency-replacement"].append(frequency_w_replacement)
-        dict_features["concreteness-original"].append(concreteness_w_original)
-        dict_features["concreteness-replacement"].append(concreteness_w_replacement)
-        dict_features["nb-synsets-original"].append(nb_synsets_word_original)
-        dict_features["nb-synsets-replacement"].append(nb_synsets_word_replacement)
-        # dict_features["wup_similarity"].append(wup_similarity)
-        dict_features["lch_similarity"].append(lch_similarity)
-        # dict_features["path_similarity"].append(path_similarity)
+        df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
 
-    df = pd.DataFrame.from_dict(dict_features)
+    if "wup_similarity" not in feature_deny_list:
+        print("Computing the Wu-Palmer similarity…", end="")
+        df["wup_similarity"] = df.apply(
+            lambda row: _compute_wup_similarity(row.word_original, row.word_replacement, row.neg_type), axis=1)
+        print(" ✓")
 
-    embedded_original_words = text_model.encode(df.word_original.tolist(), show_progress_bar=True)
-    embedded_replacement_words = text_model.encode(df.word_replacement.tolist(), show_progress_bar=True)
+    if "lch_similarity" not in feature_deny_list:
+        print("Computing the Leacock-Chodorow similarity…", end="")
+        df["lch_similarity"] = df.apply(
+            lambda row: _compute_lch_similarity(row.word_original, row.word_replacement, row.neg_type), axis=1)
+        print(" ✓")
 
-    df["word_similarity"] = util.pairwise_cos_sim(embedded_original_words, embedded_replacement_words)
+    if "path_similarity" not in feature_deny_list:
+        print("Computing the Path similarity…", end="")
+        df["path_similarity"] = df.apply(
+            lambda row: _compute_path_similarity(row.word_original, row.word_replacement, row.neg_type), axis=1)
+        print(" ✓")
 
-    df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
-    df["frequency-change"] = df["frequency-original"] - df["frequency-replacement"]
+    if "nb_synsets" not in feature_deny_list:
+        print("Computing the number of synsets…", end="")
+        df["nb-synsets-original"] = df.apply(lambda row: _get_nb_synsets(row.word_original, row.neg_type), axis=1)
+        df["nb-synsets-replacement"] = df.apply(lambda row: _get_nb_synsets(row.word_replacement, row.neg_type), axis=1)
+        print(" ✓")
 
-    dependent_variable = df["clip-score-diff"] if do_regression else df["label"]
+    print("Feature computation done.")
 
-    return df, dependent_variable
+    return df, df["clip_score_diff"] if do_regression else df["clip prediction"]
 
 
 # sklearn-pandas doesn't support the new way (scikit-learn >= 1.1) some transformers output the features.
@@ -370,8 +369,8 @@ def _fix_one_hot_encoder_columns(df: pd.DataFrame, mapper: DataFrameMapper) -> p
 
 def _transform_features_to_numbers(df: pd.DataFrame,
                                    merge_original_and_replacement_features: bool = True) -> pd.DataFrame:
-    df = df.drop(columns=["sent", "n_sent", "neg_type", "word_original", "word_replacement", "label",
-                          "clip-score-diff"])
+    df = df.drop(columns=["sentence", "neg_sentence", "pos_triplet", "neg_triplet", "neg_type", "word_original",
+                          "word_replacement", "clip prediction", "clip_score_diff"])
 
     transformers: MutableSequence[Tuple] = []
 
@@ -393,8 +392,10 @@ def _transform_features_to_numbers(df: pd.DataFrame,
 
     mapper = DataFrameMapper(transformers, df_out=True)
 
+    print("Transforming the features into numbers…", end="")
     new_df = mapper.fit_transform(df)
     new_df = _fix_one_hot_encoder_columns(new_df, mapper)
+    print(" ✓")
 
     if merge_original_and_replacement_features:
         new_columns = {}
@@ -425,7 +426,7 @@ def _transform_features_to_numbers(df: pd.DataFrame,
 
 def _describe_features(features: pd.DataFrame, dependent_variable: np.ndarray) -> None:
     if not np.issubdtype(dependent_variable.dtype, np.floating):
-        print(f"Counter dependent variable:", Counter(dependent_variable))
+        print(f"Dependent variable value counts:", Counter(dependent_variable))
 
     main_feature_names = [feature_name.split("_")[0] for feature_name in features.columns]
     print(f"Features size:", len(features.columns), "--", Counter(main_feature_names))
@@ -433,10 +434,12 @@ def _describe_features(features: pd.DataFrame, dependent_variable: np.ndarray) -
 
 
 def _compute_numeric_features(clip_results: pd.DataFrame, max_feature_count: Optional[int] = None,
+                              feature_deny_list: Collection[str] = frozenset(),
                               merge_original_and_replacement_features: bool = True, do_regression: bool = True,
                               feature_min_non_zero_values: int = 50,
                               verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
-    raw_features, dependent_variable = _compute_features(clip_results, do_regression=do_regression,
+    raw_features, dependent_variable = _compute_features(clip_results, feature_deny_list=feature_deny_list,
+                                                         do_regression=do_regression,
                                                          max_feature_count=max_feature_count)
     features = _transform_features_to_numbers(
         raw_features, merge_original_and_replacement_features=merge_original_and_replacement_features)
@@ -453,12 +456,12 @@ def _compute_numeric_features(clip_results: pd.DataFrame, max_feature_count: Opt
     return raw_features, features, dependent_variable
 
 
-def load_features(path: str, max_feature_count: Optional[int] = None,
+def load_features(path: str, max_feature_count: Optional[int] = None, feature_deny_list: Collection[str] = frozenset(),
                   merge_original_and_replacement_features: bool = True, do_regression: bool = True,
                   feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
     clip_results = _load_clip_results(path)
     return _compute_numeric_features(
-        clip_results, max_feature_count=max_feature_count,
+        clip_results, max_feature_count=max_feature_count, feature_deny_list=feature_deny_list,
         merge_original_and_replacement_features=merge_original_and_replacement_features, do_regression=do_regression,
         feature_min_non_zero_values=feature_min_non_zero_values)
 
