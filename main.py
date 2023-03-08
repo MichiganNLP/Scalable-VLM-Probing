@@ -116,16 +116,13 @@ def compute_ols_regression(features: pd.DataFrame, labels: np.ndarray, raw_featu
     df = df[df["P>|t|"] <= .05]
     df = df.sort_values(by=["coef"], ascending=False)
 
-    print("Significant features:")
-    print(df.to_string())
-
     multi_label_features = {feature_name.split("-", maxsplit=1)[0]
                             for feature_name in df.index
                             if (feature_name.split("_", maxsplit=1)[0] in raw_features
                                 and is_feature_multi_label(raw_features[feature_name.split("_", maxsplit=1)[0]]))}
 
-    print()
-    print("Example words from the significant features:")
+    df["Examples"] = ""
+
     for feature_name in df.index:
         prefix = feature_name.split("-", maxsplit=1)[0]
         if prefix in multi_label_features:
@@ -138,7 +135,10 @@ def compute_ols_regression(features: pd.DataFrame, labels: np.ndarray, raw_featu
             words = pd.concat([original_words, replacement_words])
             counter = Counter(words.tolist())
 
-            print(feature_name, "--", ", ".join(f"{word} ({freq})" for word, freq in counter.most_common(5)))
+            df.loc[feature_name, "Examples"] = ", ".join(f"{word} ({freq})" for word, freq in counter.most_common(5))
+
+    print("Significant features:")
+    print(df.to_string())
 
 
 def compute_ridge_regression(features: pd.DataFrame, labels: np.ndarray) -> None:
