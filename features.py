@@ -332,12 +332,12 @@ def _compute_features(clip_results: pd.DataFrame, do_regression: bool = True,
         dict_features["lch_similarity"].append(lch_similarity)
         # dict_features["path_similarity"].append(path_similarity)
 
-    embedded_original_words = text_model.encode(dict_features["word_original"], show_progress_bar=True)
-    embedded_replacement_words = text_model.encode(dict_features["word_replacement"], show_progress_bar=True)
-
-    dict_features["word_similarity"] = util.pairwise_cos_sim(embedded_original_words, embedded_replacement_words)
-
     df = pd.DataFrame.from_dict(dict_features)
+
+    embedded_original_words = text_model.encode(df.word_original.tolist(), show_progress_bar=True)
+    embedded_replacement_words = text_model.encode(df.word_replacement.tolist(), show_progress_bar=True)
+
+    df["word_similarity"] = util.pairwise_cos_sim(embedded_original_words, embedded_replacement_words)
 
     df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
     df["frequency-change"] = df["frequency-original"] - df["frequency-replacement"]
