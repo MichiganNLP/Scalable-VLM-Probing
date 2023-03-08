@@ -255,14 +255,7 @@ def _compute_features(clip_results: pd.DataFrame, do_regression: bool = True,
     if max_feature_count:
         clip_results = clip_results[:max_feature_count]
 
-    dict_features: Dict[str, Any] = {"word_original": [], "word_replacement": [],
-                                     "Levin-original": [], "Levin-replacement": [],
-                                     "LIWC-original": [], "LIWC-replacement": [],
-                                     "hypernym-original": [], "hypernym-replacement": [],
-                                     "frequency-original": [], "frequency-replacement": [],
-                                     "concreteness-original": [], "concreteness-replacement": [],
-                                     # "wup_similarity": [], "path_similarity": [],
-                                     "lch_similarity": [], "nb-synsets-original": [], "nb-synsets-replacement": []}
+    dict_features: Dict[str, Any] = defaultdict(list)
 
     dict_levin = _parse_levin_file()
     dict_liwc = _parse_liwc_file()
