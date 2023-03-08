@@ -413,7 +413,7 @@ def _transform_features_to_numbers(df: pd.DataFrame,
 
                 replacement_column_name = f"{prefix}-replacement_{suffix}"
                 if replacement_column_name in new_df.columns:
-                    new_columns[f"{prefix}_change_{suffix}"] = new_df[column] - new_df[replacement_column_name]
+                    new_columns[f"{prefix}-change_{suffix}"] = new_df[column] - new_df[replacement_column_name]
                     columns_to_remove.append(column)
                     columns_to_remove.append(replacement_column_name)
 

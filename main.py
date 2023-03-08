@@ -122,14 +122,14 @@ def compute_ols_regression(features: pd.DataFrame, labels: np.ndarray, raw_featu
     print()
     print("Example words from the significant features:")
     for feature_name in df.index:
-        prefix = feature_name.split("_", maxsplit=1)[0]
-        if prefix in {"LIWC", "Levin"}:
-            category = feature_name.split("_", maxsplit=2)[-1]
+        prefix = feature_name.split("-", maxsplit=1)[0]
+        if prefix in {"LIWC", "Levin", "hypernym"}:
+            suffix = feature_name.split("_", maxsplit=2)[-1]
 
             original_words = raw_features[raw_features[f"{prefix}-original"].apply(
-                lambda categories: category in categories)].word_original
+                lambda labels: suffix in labels)].word_original
             replacement_words = raw_features[raw_features[f"{prefix}-replacement"].apply(
-                lambda categories: category in categories)].word_replacement
+                lambda labels: suffix in labels)].word_replacement
             words = pd.concat([original_words, replacement_words])
             counter = Counter(words.tolist())
 
