@@ -244,7 +244,7 @@ def _get_original_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: Neg
 
 
 def _compute_features(clip_results: pd.DataFrame,
-                      max_feature_count: Optional[int] = None) -> Tuple[pd.DataFrame, Sequence[int]]:
+                      max_feature_count: Optional[int] = None) -> pd.DataFrame:
     if max_feature_count:
         clip_results = clip_results[:max_feature_count]
 
@@ -261,6 +261,9 @@ def _compute_features(clip_results: pd.DataFrame,
     dict_liwc = _parse_liwc_file()
     dict_concreteness = _parse_concreteness_file()
 
+    with open("data/words_counter_LAION.json") as json_file:
+        words_counter_laion = json.load(json_file)
+
     sentences = clip_results.sentence.array
     negative_sentences = clip_results.neg_sentence.array
 
@@ -271,9 +274,6 @@ def _compute_features(clip_results: pd.DataFrame,
 
     dict_features["label"] = clip_results["clip prediction"]
     dict_features["clip-score-diff"] = clip_results.clip_score_diff
-
-    with open("data/words_counter_LAION.json") as json_file:
-        words_counter_laion = json.load(json_file)
 
     embedded_sentences = text_model.encode(sentences, show_progress_bar=True)
     embedded_neg_sentences = text_model.encode(negative_sentences, show_progress_bar=True)
@@ -336,25 +336,7 @@ def _compute_features(clip_results: pd.DataFrame,
 
     dict_features["word_similarity"] = util.pairwise_cos_sim(embedded_original_words, embedded_replacement_words)
 
-    levin_liwc = [item for sublist in dict_features["Levin-original"] + dict_features["Levin-replacement"] +
-                  dict_features["LIWC-original"] + dict_features["LIWC-replacement"] for item in sublist]
-    wordnet = dict_features["hypernym-original"] + dict_features["hypernym-replacement"]
-
-    features_count = (levin_liwc + wordnet + ["neg_type-" + v for v in dict_features["neg_type"]] +
-                      ["text_similarity"] * len(dict_features["text_similarity"]) +
-                      ["word_similarity"] * len(dict_features["word_similarity"]) +
-                      ["wup_similarity"] * len(dict_features["wup_similarity"]) +
-                      ["lch_similarity"] * len(dict_features["lch_similarity"]) +
-                      ["path_similarity"] * len(dict_features["path_similarity"]) +
-                      ["frequency-original"] * len(dict_features["frequency-original"]) +
-                      ["frequency-replacement"] * len(dict_features["frequency-replacement"]) +
-                      ["concreteness-original"] * len(dict_features["concreteness-original"]) +
-                      ["concreteness-replacement"] * len(dict_features["concreteness-replacement"]) +
-                      ["nb-synsets-original"] * len(dict_features["nb-synsets-original"]) +
-                      ["nb-synsets-replacement"] * len(dict_features["nb-synsets-replacement"])
-                      )
-
-    return pd.DataFrame.from_dict(dict_features), features_count
+    return pd.DataFrame.from_dict(dict_features)
 
 
 # sklearn-pandas doesn't support the new way (scikit-learn >= 1.1) some transformers output the features.
@@ -437,20 +419,20 @@ def _describe_features(clip_results: pd.DataFrame, features: pd.DataFrame) -> No
 def _compute_numeric_features(clip_results: pd.DataFrame, max_feature_count: Optional[int] = None,
                               merge_original_and_replacement_features: bool = True, do_regression: bool = True,
                               feature_min_non_zero_values: int = 50
-                              ) -> Tuple[pd.DataFrame, pd.DataFrame, Sequence[int], np.ndarray]:
-    raw_features, features_count = _compute_features(clip_results, max_feature_count=max_feature_count)
+                              ) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
+    raw_features = _compute_features(clip_results, max_feature_count=max_feature_count)
     features = _transform_features_to_numbers(
         raw_features, merge_original_and_replacement_features=merge_original_and_replacement_features)
     features = features.loc[:, ((features != 0).sum(0) >= feature_min_non_zero_values)]
     _describe_features(clip_results, features)
     dependent_variable = raw_features["clip-score-diff"] if do_regression else raw_features["label"]
-    return raw_features, features, features_count, dependent_variable
+    return raw_features, features, dependent_variable
 
 
 def load_features(path: str, max_feature_count: Optional[int] = None,
                   merge_original_and_replacement_features: bool = True, do_regression: bool = True,
                   feature_min_non_zero_values: int = 50,
-                  ) -> Tuple[pd.DataFrame, pd.DataFrame, Sequence[int], np.ndarray]:
+                  ) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
     clip_results = _load_clip_results(path)
     return _compute_numeric_features(
         clip_results, max_feature_count=max_feature_count,

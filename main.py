@@ -3,7 +3,7 @@ import argparse
 from collections import Counter
 from functools import partial
 from multiprocessing import Pool
-from typing import Sequence, Tuple
+from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,8 +15,8 @@ from tqdm.auto import tqdm
 
 from features import is_feature_binary, load_features
 
-CLASSIFICATION_MODELS = {"dominance-score"}
-REGRESSION_MODELS = {"ols", "ridge", "svm"}
+CLASSIFICATION_MODELS = {"dominance-score", "svm"}
+REGRESSION_MODELS = {"ols", "ridge"}
 MODELS = CLASSIFICATION_MODELS | REGRESSION_MODELS
 
 
@@ -37,21 +37,22 @@ def _plot_coef_weights_svm(coef_weights: np.ndarray, features: pd.DataFrame,
 
 # https://www.kaggle.com/code/pierpaolo28/pima-indians-diabetes-database/notebook
 def _print_sorted_coef_weights_svm(coef: np.ndarray, coef_significance: np.ndarray, coef_sign: np.ndarray,
-                                   features: pd.DataFrame, features_count: Sequence[int],
-                                   output_path: str = "data/sorted_features.csv") -> None:
-    sorted_coefficients_idx = np.argsort(coef)[::-1]  # in descending order
+                                   features: pd.DataFrame, output_path: str = "data/sorted_features.csv") -> None:
+    sorted_coefficients_idx = np.argsort(coef)[::-1]  # In descending order.
     sorted_coefficients = [np.round(weight, 2) for weight in coef[sorted_coefficients_idx]]
 
     feature_names = features.columns
     sorted_feature_names = feature_names[sorted_coefficients_idx].tolist()
     sorted_feature_significance = coef_significance[sorted_coefficients_idx].tolist()
     sorted_feature_sign = coef_sign[sorted_coefficients_idx].tolist()
-    sorted_feature_counts = [features_count.count(feature.split("_")[1]) for feature in sorted_feature_names]
+
+    sorted_features = features[sorted_feature_names]
+    sorted_feature_counts = (sorted_features != 0 & sorted_features.notna()).sum(axis=0)
 
     df = pd.DataFrame(
         zip(sorted_feature_names, sorted_feature_significance, sorted_feature_counts, sorted_coefficients,
             sorted_feature_sign),
-        columns=["Feature", "Significance", "Data Count", "Weight (abs)", "Weight sign"])
+        columns=["Feature", "Significance", "Not zero nor NaN", "Weight (abs)", "Weight sign"])
     df.to_csv(output_path, index=False)
 
 
@@ -93,10 +94,9 @@ def _analyze_coef_weights_svm(features: pd.DataFrame, labels: np.ndarray,
     return coef_weights, coef_significance, coef_sign
 
 
-def compute_svm_regression(features: pd.DataFrame, labels: np.ndarray, features_count: Sequence[int],
-                           iterations: int) -> None:
+def compute_svm_regression(features: pd.DataFrame, labels: np.ndarray, iterations: int) -> None:
     coef_weights, coef_significance, coef_sign = _analyze_coef_weights_svm(features, labels, iterations)
-    _print_sorted_coef_weights_svm(coef_weights, coef_significance, coef_sign, features, features_count)
+    _print_sorted_coef_weights_svm(coef_weights, coef_significance, coef_sign, features)
     _plot_coef_weights_svm(coef_weights, features)
 
 
@@ -184,7 +184,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    raw_features, features, features_count, labels = load_features(
+    raw_features, features, labels = load_features(
         path=args.input_path, max_feature_count=1000 if args.debug else None,
         merge_original_and_replacement_features=args.merge_original_and_replacement_features,
         do_regression=args.model in REGRESSION_MODELS, feature_min_non_zero_values=args.feature_min_non_zero_values)
@@ -196,7 +196,7 @@ def main() -> None:
     elif args.model == "ridge":
         compute_ridge_regression(features, labels)
     elif args.model == "svm":
-        compute_svm_regression(features, labels, features_count, iterations=args.iterations)
+        compute_svm_regression(features, labels, iterations=args.iterations)
     else:
         raise ValueError(f"Unknown model: {args.model} (should be in {MODELS}).")
 
