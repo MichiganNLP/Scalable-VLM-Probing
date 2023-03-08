@@ -19,6 +19,12 @@ from tqdm.auto import tqdm
 NegType = Literal["s", "v", "o"]
 Triplet = Tuple[str, str, str]
 
+PATH_LEVIN_VERBS = "data/levin_verbs.txt"
+PATH_LEVIN_SEMANTIC_BROAD = "data/levin_semantic_broad.json"
+PATH_LIWC = "data/LIWC.2015.all.txt"
+PATH_CONCRETENESS = "data/concreteness.txt"
+PATH_WORD_FREQUENCIES = "data/words_counter_LAION.json"
+
 text_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 stemmer = PorterStemmer()
@@ -83,8 +89,8 @@ def _load_clip_results(path: str) -> pd.DataFrame:
 
 
 @functools.lru_cache
-def _parse_levin_file(path: str = "data/levin_verbs.txt",
-                      path_semantic_broad: str = "data/levin_semantic_broad.json",
+def _parse_levin_file(path: str = PATH_LEVIN_VERBS,
+                      path_semantic_broad: str = PATH_LEVIN_SEMANTIC_BROAD,
                       verbose: bool = True) -> Mapping[str, Collection[str]]:
     content = ""
     map_class_name_to_words = {}
@@ -165,7 +171,7 @@ def _get_hypernyms(word: str, neg_type: NegType) -> Sequence[str]:
 
 
 @functools.lru_cache
-def _parse_liwc_file(path: str = "data/LIWC.2015.all.txt", verbose: bool = True) -> Mapping[str, Sequence[str]]:
+def _parse_liwc_file(path: str = PATH_LIWC, verbose: bool = True) -> Mapping[str, Sequence[str]]:
     dict_liwc = defaultdict(list)
     liwc_categories = set()
 
@@ -190,7 +196,7 @@ def _get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Col
 
 
 @functools.lru_cache
-def _parse_concreteness_file(path: str = "data/concreteness.txt") -> Mapping[str, float]:
+def _parse_concreteness_file(path: str = PATH_CONCRETENESS) -> Mapping[str, float]:
     dict_concreteness = {}
     with open(path) as file:
         next(file)  # Skip the first line.
@@ -261,8 +267,8 @@ def _compute_features(clip_results: pd.DataFrame,
     dict_liwc = _parse_liwc_file()
     dict_concreteness = _parse_concreteness_file()
 
-    with open("data/words_counter_LAION.json") as json_file:
-        words_counter_laion = json.load(json_file)
+    with open(PATH_WORD_FREQUENCIES) as json_file:
+        word_frequencies = json.load(json_file)
 
     sentences = clip_results.sentence.array
     negative_sentences = clip_results.neg_sentence.array
@@ -297,8 +303,8 @@ def _compute_features(clip_results: pd.DataFrame,
         liwc_category_w_original = _get_liwc_category(word_original, dict_liwc)
         liwc_category_w_replacement = _get_liwc_category(word_replacement, dict_liwc)
 
-        frequency_w_original = words_counter_laion.get(word_original, 0)
-        frequency_w_replacement = words_counter_laion.get(word_replacement, 0)
+        frequency_w_original = word_frequencies.get(word_original, 0)
+        frequency_w_replacement = word_frequencies.get(word_replacement, 0)
 
         concreteness_w_original = _get_concreteness_score(word_original, dict_concreteness)
         concreteness_w_replacement = _get_concreteness_score(word_replacement, dict_concreteness)
