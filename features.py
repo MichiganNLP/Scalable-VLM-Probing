@@ -6,18 +6,16 @@ import itertools
 import json
 import string
 from collections import Counter, defaultdict
-from typing import Collection, Iterable, Literal, Mapping, MutableSequence, Sequence, Tuple, get_args
+from typing import Any, Collection, Iterable, Literal, Mapping, MutableSequence, Sequence, Tuple, get_args
 
 import numpy as np
 import pandas as pd
 from nltk.corpus import wordnet
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from sentence_transformers import SentenceTransformer, util
-from sklearn.base import TransformerMixin
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import FunctionTransformer, MultiLabelBinarizer, OneHotEncoder, StandardScaler
 from sklearn_pandas import DataFrameMapper
-from sklearn_pandas.pipeline import make_transformer_pipeline
 
 NegType = Literal["s", "v", "o"]
 Triplet = Tuple[str, str, str]
@@ -370,28 +368,34 @@ def _fix_one_hot_encoder_columns(df: pd.DataFrame, mapper: DataFrameMapper) -> p
     return df
 
 
-def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True) -> TransformerMixin | None:
+def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
+                       standardize_binary_features: bool = True) -> Any:
+    transformers = None
+
     dtype = feature.dtype
     if np.issubdtype(dtype, np.floating) or np.issubdtype(dtype, np.integer):
         if impute_missing_values:
-            return make_transformer_pipeline(SimpleImputer(), StandardScaler())
+            transformers = [SimpleImputer(), StandardScaler()]
         else:
-            return StandardScaler()
+            transformers = [StandardScaler()]
     elif dtype == object:
-        if all(issubclass(type(x), str) for x in feature):
-            return OneHotEncoder(dtype=bool)
+        if is_feature_string(feature):
+            transformers = [OneHotEncoder(dtype=bool)]
         elif is_feature_multi_label(feature):
-            return MultiLabelBinarizer()
-        else:
-            return None
+            transformers = [MultiLabelBinarizer()]
     elif is_feature_binary(feature):
-        return FunctionTransformer(lambda x: x)
-    else:
-        return None
+        transformers = [FunctionTransformer(lambda x: x)]
+
+    if standardize_binary_features and (is_feature_binary(feature) or is_feature_multi_label(feature)
+                                        or is_feature_string(feature)):
+        transformers.append(StandardScaler())
+
+    return transformers
 
 
 def _transform_features_to_numbers(
         df: pd.DataFrame, dependent_variable_name: str, standardize_dependent_variable: bool = True,
+        standardize_binary_features: bool = True,
         merge_original_and_replacement_features: bool = True) -> Tuple[pd.DataFrame, np.ndarray]:
     if not standardize_dependent_variable:
         dependent_variable = df.pop(dependent_variable_name)
@@ -403,9 +407,11 @@ def _transform_features_to_numbers(
     transformers: MutableSequence[Tuple] = []
 
     for column_name in df.columns:
+        column = df[column_name]
         impute_missing_values = column_name != dependent_variable_name
-        if transformer := _infer_transformer(df[column_name], impute_missing_values=impute_missing_values):
-            selector = column_name if isinstance(transformer, MultiLabelBinarizer) else [column_name]
+        if transformer := _infer_transformer(column, impute_missing_values=impute_missing_values,
+                                             standardize_binary_features=standardize_binary_features):
+            selector = column_name if is_feature_multi_label(column) else [column_name]
             transformers.append((selector, transformer))
 
     considered_column_names = {c for t in transformers for c in (t[0] if isinstance(t[0], list) else [t[0]])}
@@ -428,8 +434,7 @@ def _transform_features_to_numbers(
 
         multi_label_original_word_feature_names = [t[0]
                                                    for t in transformers
-                                                   if (isinstance(t[1], MultiLabelBinarizer)
-                                                       and t[0].endswith("-original"))]
+                                                   if isinstance(t[0], str) and t[0].endswith("-original")]
 
         for column in new_df.columns:
             if column.startswith(multi_label_original_word_feature_names):
@@ -462,11 +467,13 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
                               max_feature_count: int | None = None, feature_deny_list: Collection[str] = frozenset(),
                               merge_original_and_replacement_features: bool = True,
                               feature_min_non_zero_values: int = 50, standardize_dependent_variable: bool = True,
+                              standardize_binary_features: bool = True,
                               verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
     raw_features = _compute_features(clip_results, feature_deny_list=feature_deny_list,
                                      max_feature_count=max_feature_count)
     features, dependent_variable = _transform_features_to_numbers(
         raw_features, dependent_variable_name, standardize_dependent_variable=standardize_dependent_variable,
+        standardize_binary_features=standardize_binary_features,
         merge_original_and_replacement_features=merge_original_and_replacement_features)
 
     features_mask = (features != 0).sum(0) >= feature_min_non_zero_values
@@ -483,12 +490,13 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
 
 def load_features(path: str, dependent_variable_name: str, max_feature_count: int | None = None,
                   feature_deny_list: Collection[str] = frozenset(), standardize_dependent_variable: bool = True,
-                  merge_original_and_replacement_features: bool = True,
+                  standardize_binary_features: bool = True, merge_original_and_replacement_features: bool = True,
                   feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
     clip_results = _load_clip_results(path)
     return _compute_numeric_features(
         clip_results, dependent_variable_name, max_feature_count=max_feature_count, feature_deny_list=feature_deny_list,
         standardize_dependent_variable=standardize_dependent_variable,
+        standardize_binary_features=standardize_binary_features,
         merge_original_and_replacement_features=merge_original_and_replacement_features,
         feature_min_non_zero_values=feature_min_non_zero_values)
 
@@ -499,3 +507,7 @@ def is_feature_binary(feature: np.ndarray) -> bool:
 
 def is_feature_multi_label(feature: np.ndarray) -> bool:
     return all(issubclass(type(x), Iterable) and not issubclass(type(x), str) for x in feature)
+
+
+def is_feature_string(feature: np.ndarray) -> bool:
+    return all(issubclass(type(x), str) for x in feature)
