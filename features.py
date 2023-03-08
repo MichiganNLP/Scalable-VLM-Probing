@@ -152,7 +152,7 @@ def _parse_levin_file(path: str = PATH_LEVIN_VERBS,
 
 
 def _get_levin_category(word: str, dict_levin: Mapping[str, Collection[str]]) -> Collection[str]:
-    return dict_levin[word]
+    return dict_levin.get(word, [])
 
 
 def _get_nb_synsets(word: str, neg_type: NegType) -> int:  # noqa
