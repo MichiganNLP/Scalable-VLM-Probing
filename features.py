@@ -232,76 +232,6 @@ def _compute_path_similarity(word_original: str, word_replacement: str, neg_type
                default=float("nan"))
 
 
-# sklearn-pandas doesn't support the new way (scikit-learn >= 1.1) some transformers output the features.
-# See https://github.com/scikit-learn-contrib/sklearn-pandas/pull/248
-def _fix_one_hot_encoder_columns(df: pd.DataFrame, mapper: DataFrameMapper) -> pd.DataFrame:
-    for columns, transformer, kwargs in mapper.built_features:
-        if isinstance(transformer, OneHotEncoder):
-            assert isinstance(columns, Iterable) and not isinstance(columns, str)
-
-            new_names = transformer.get_feature_names_out(columns)
-
-            old_name_prefix = kwargs.get("alias", "_".join(str(c) for c in columns))
-            old_names = [f"{old_name_prefix}_{i}" for i in range(len(new_names))]
-
-            df = df.rename(columns=dict(zip(old_names, new_names)))
-
-    return df
-
-
-def _transform_features_to_numbers(df: pd.DataFrame,
-                                   merge_original_and_replacement_features: bool = True) -> pd.DataFrame:
-    df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
-    df["frequency-change"] = df["frequency-original"] - df["frequency-replacement"]
-
-    mapper = DataFrameMapper([
-        # (["neg_type"], OneHotEncoder(dtype=bool)),
-        ("Levin-original", MultiLabelBinarizer()),
-        ("Levin-replacement", MultiLabelBinarizer()),
-        ("LIWC-original", MultiLabelBinarizer()),
-        ("LIWC-replacement", MultiLabelBinarizer()),
-        ("WordNet-original", MultiLabelBinarizer()),
-        ("WordNet-replacement", MultiLabelBinarizer()),
-        (["concreteness-change"], [SimpleImputer(), StandardScaler()]),
-        (["concreteness-original"], [SimpleImputer(), StandardScaler()]),
-        (["concreteness-replacement"], [SimpleImputer(), StandardScaler()]),
-        (["frequency-change"], [SimpleImputer(), StandardScaler()]),
-        (["frequency-original"], [SimpleImputer(), StandardScaler()]),
-        (["frequency-replacement"], [SimpleImputer(), StandardScaler()]),
-        (["text_similarity"], [SimpleImputer(), StandardScaler()]),
-        (["word_similarity"], [SimpleImputer(), StandardScaler()]),
-        (["nb-synsets-original"], [SimpleImputer(), StandardScaler()]),
-        (["nb-synsets-replacement"], [SimpleImputer(), StandardScaler()]),
-        # (["wup_similarity"], [SimpleImputer(), StandardScaler()]),
-        (["lch_similarity"], [SimpleImputer(), StandardScaler()]),
-        # (["path_similarity"], [SimpleImputer(), StandardScaler()]),
-    ], df_out=True)
-
-    new_df = mapper.fit_transform(df)
-    new_df = _fix_one_hot_encoder_columns(new_df, mapper)
-
-    if merge_original_and_replacement_features:
-        new_columns = {}
-        columns_to_remove = []
-
-        for column in new_df.columns:
-            if column.startswith(("Levin-original", "LIWC-original", "WordNet-original")):
-                prefix = column.split("-", maxsplit=1)[0]
-                category = column.split("_", maxsplit=1)[1]
-
-                replacement_column_name = f"{prefix}-replacement_{category}"
-                if replacement_column_name in new_df.columns:
-                    new_columns[f"{prefix}_change_{category}"] = new_df[column] - new_df[replacement_column_name]
-                    columns_to_remove.append(column)
-                    columns_to_remove.append(replacement_column_name)
-
-        # Change them all together to avoid fragmentation.
-        new_df = new_df.drop(columns_to_remove, axis="columns")
-        new_df = pd.concat((new_df, pd.DataFrame.from_dict(new_columns)), axis="columns")
-
-    return new_df
-
-
 def _get_original_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: NegType) -> Tuple[str, str]:
     if neg_type == "s":
         return pos_triplet[0], neg_triplet[0]
@@ -424,6 +354,76 @@ def _compute_features(clip_results: pd.DataFrame,
                       )
 
     return pd.DataFrame.from_dict(dict_features), features_count
+
+
+# sklearn-pandas doesn't support the new way (scikit-learn >= 1.1) some transformers output the features.
+# See https://github.com/scikit-learn-contrib/sklearn-pandas/pull/248
+def _fix_one_hot_encoder_columns(df: pd.DataFrame, mapper: DataFrameMapper) -> pd.DataFrame:
+    for columns, transformer, kwargs in mapper.built_features:
+        if isinstance(transformer, OneHotEncoder):
+            assert isinstance(columns, Iterable) and not isinstance(columns, str)
+
+            new_names = transformer.get_feature_names_out(columns)
+
+            old_name_prefix = kwargs.get("alias", "_".join(str(c) for c in columns))
+            old_names = [f"{old_name_prefix}_{i}" for i in range(len(new_names))]
+
+            df = df.rename(columns=dict(zip(old_names, new_names)))
+
+    return df
+
+
+def _transform_features_to_numbers(df: pd.DataFrame,
+                                   merge_original_and_replacement_features: bool = True) -> pd.DataFrame:
+    df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
+    df["frequency-change"] = df["frequency-original"] - df["frequency-replacement"]
+
+    mapper = DataFrameMapper([
+        # (["neg_type"], OneHotEncoder(dtype=bool)),
+        ("Levin-original", MultiLabelBinarizer()),
+        ("Levin-replacement", MultiLabelBinarizer()),
+        ("LIWC-original", MultiLabelBinarizer()),
+        ("LIWC-replacement", MultiLabelBinarizer()),
+        ("WordNet-original", MultiLabelBinarizer()),
+        ("WordNet-replacement", MultiLabelBinarizer()),
+        (["concreteness-change"], [SimpleImputer(), StandardScaler()]),
+        (["concreteness-original"], [SimpleImputer(), StandardScaler()]),
+        (["concreteness-replacement"], [SimpleImputer(), StandardScaler()]),
+        (["frequency-change"], [SimpleImputer(), StandardScaler()]),
+        (["frequency-original"], [SimpleImputer(), StandardScaler()]),
+        (["frequency-replacement"], [SimpleImputer(), StandardScaler()]),
+        (["text_similarity"], [SimpleImputer(), StandardScaler()]),
+        (["word_similarity"], [SimpleImputer(), StandardScaler()]),
+        (["nb-synsets-original"], [SimpleImputer(), StandardScaler()]),
+        (["nb-synsets-replacement"], [SimpleImputer(), StandardScaler()]),
+        # (["wup_similarity"], [SimpleImputer(), StandardScaler()]),
+        (["lch_similarity"], [SimpleImputer(), StandardScaler()]),
+        # (["path_similarity"], [SimpleImputer(), StandardScaler()]),
+    ], df_out=True)
+
+    new_df = mapper.fit_transform(df)
+    new_df = _fix_one_hot_encoder_columns(new_df, mapper)
+
+    if merge_original_and_replacement_features:
+        new_columns = {}
+        columns_to_remove = []
+
+        for column in new_df.columns:
+            if column.startswith(("Levin-original", "LIWC-original", "WordNet-original")):
+                prefix = column.split("-", maxsplit=1)[0]
+                category = column.split("_", maxsplit=1)[1]
+
+                replacement_column_name = f"{prefix}-replacement_{category}"
+                if replacement_column_name in new_df.columns:
+                    new_columns[f"{prefix}_change_{category}"] = new_df[column] - new_df[replacement_column_name]
+                    columns_to_remove.append(column)
+                    columns_to_remove.append(replacement_column_name)
+
+        # Change them all together to avoid fragmentation.
+        new_df = new_df.drop(columns_to_remove, axis="columns")
+        new_df = pd.concat((new_df, pd.DataFrame.from_dict(new_columns)), axis="columns")
+
+    return new_df
 
 
 def _describe_features(clip_results: pd.DataFrame, features: pd.DataFrame) -> None:
