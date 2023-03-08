@@ -20,6 +20,8 @@ from tqdm.auto import tqdm
 NegType = Literal["s", "v", "o"]
 Triplet = Tuple[str, str, str]
 
+VALID_NEG_TYPES = get_args(NegType)
+
 PATH_LEVIN_VERBS = "data/levin_verbs.txt"
 PATH_LEVIN_SEMANTIC_BROAD = "data/levin_semantic_broad.json"
 PATH_LIWC = "data/LIWC.2015.all.txt"
@@ -82,7 +84,7 @@ def _load_clip_results(path: str) -> pd.DataFrame:
                                         axis=1)
 
     df.neg_type = df.neg_type.str.get(0)
-    assert df.neg_type.isin(get_args(NegType)).all()
+    assert df.neg_type.isin(VALID_NEG_TYPES).all()
 
     df["clip prediction"] = df["clip prediction"] == "pos"
 
@@ -240,14 +242,8 @@ def _compute_path_similarity(word_original: str, word_replacement: str, neg_type
 
 
 def _get_original_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: NegType) -> Tuple[str, str]:
-    if neg_type == "s":
-        return pos_triplet[0], neg_triplet[0]
-    elif neg_type == "v":
-        return pos_triplet[1], neg_triplet[1]
-    elif neg_type == "o":
-        return pos_triplet[2], neg_triplet[2]
-    else:
-        raise ValueError(f"Wrong neg_type: {neg_type}, needs to be one from {get_args(NegType)}")
+    i = VALID_NEG_TYPES.index(neg_type)
+    return pos_triplet[i], neg_triplet[i]
 
 
 def _compute_features(clip_results: pd.DataFrame, do_regression: bool = True,
