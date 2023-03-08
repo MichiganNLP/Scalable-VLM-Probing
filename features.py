@@ -168,18 +168,17 @@ def _get_levin_category(word: str, dict_levin: Mapping[str, Collection[str]]) ->
 
 def _get_nb_synsets(word: str, neg_type: NegType) -> int:  # noqa
     # pos = _neg_type_to_pos(neg_type)
-    # synsets = wordnet.synsets(word, pos=pos)
+    # synsets = wordnet.synsets(word, pos=pos)  # FIXME: why not using the POS?
     synsets = wordnet.synsets(word)
     return len(synsets)
 
 
 def _get_hypernyms(word: str, neg_type: NegType) -> Sequence[str]:
-    pos = _neg_type_to_pos(neg_type)
-    if not (synsets := wordnet.synsets(word, pos=pos)):
+    if synsets := wordnet.synsets(word, pos=_neg_type_to_pos(neg_type)):
+        hypernym_synsets = synsets[0].hypernyms() or synsets  # FIXME: why not using all the synsets?
+        return [hypernym_synsets[0]._lemma_names[0]]  # FIXME: why not returning all lemma names?
+    else:
         return [word]
-    synsets = synsets[0].hypernyms() or synsets
-    broad_semantic_category = synsets[0]._lemma_names[0]
-    return [broad_semantic_category]
 
 
 @functools.lru_cache
