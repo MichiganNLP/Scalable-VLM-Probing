@@ -260,8 +260,8 @@ def _compute_features(clip_results: pd.DataFrame,
                                      "hypernym-original": [], "hypernym-replacement": [],
                                      "frequency-original": [], "frequency-replacement": [],
                                      "concreteness-original": [], "concreteness-replacement": [],
-                                     "nb-synsets-original": [], "nb-synsets-replacement": [], "text_similarity": [],
-                                     "wup_similarity": [], "lch_similarity": [], "path_similarity": []}
+                                     "wup_similarity": [], "lch_similarity": [], "path_similarity": [],
+                                     "nb-synsets-original": [], "nb-synsets-replacement": []}
 
     dict_levin = _parse_levin_file()
     dict_liwc = _parse_liwc_file()
@@ -313,6 +313,7 @@ def _compute_features(clip_results: pd.DataFrame,
         lch_similarity = _compute_lch_similarity(word_original, word_replacement, neg_type=row.neg_type)
         # path_similarity = _compute_path_similarity(word_original, word_replacement, neg_type=row.neg_type)
         wup_similarity, path_similarity = float("nan"), float("nan")
+
         nb_synsets_word_original = _get_nb_synsets(word_original, row.neg_type)
         nb_synsets_word_replacement = _get_nb_synsets(word_replacement, row.neg_type)
 
