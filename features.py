@@ -251,7 +251,7 @@ def _compute_features(clip_results: pd.DataFrame,
     dict_features: Dict[str, Any] = {"word_original": [], "word_replacement": [], "neg_type": [],
                                      "Levin-original": [], "Levin-replacement": [],
                                      "LIWC-original": [], "LIWC-replacement": [],
-                                     "WordNet-original": [], "WordNet-replacement": [],
+                                     "hypernym-original": [], "hypernym-replacement": [],
                                      "frequency-original": [], "frequency-replacement": [],
                                      "concreteness-original": [], "concreteness-replacement": [],
                                      "nb-synsets-original": [], "nb-synsets-replacement": [], "text_similarity": [],
@@ -308,8 +308,8 @@ def _compute_features(clip_results: pd.DataFrame,
         nb_synsets_word_original = _get_nb_synsets(word_original, row.neg_type)
         nb_synsets_word_replacement = _get_nb_synsets(word_replacement, row.neg_type)
 
-        wordnet_semantic_category_original = _get_hypernyms(word_original, row.neg_type)
-        wordnet_semantic_category_replacement = _get_hypernyms(word_replacement, row.neg_type)
+        hypernym_original = _get_hypernyms(word_original, row.neg_type)
+        hypernym_replacement = _get_hypernyms(word_replacement, row.neg_type)
 
         dict_features["word_original"].append(word_original)
         dict_features["word_replacement"].append(word_replacement)
@@ -318,8 +318,8 @@ def _compute_features(clip_results: pd.DataFrame,
         dict_features["Levin-replacement"].append(levin_classes_w_replacement)
         dict_features["LIWC-original"].append(liwc_category_w_original)
         dict_features["LIWC-replacement"].append(liwc_category_w_replacement)
-        dict_features["WordNet-original"].append(wordnet_semantic_category_original)
-        dict_features["WordNet-replacement"].append(wordnet_semantic_category_replacement)
+        dict_features["hypernym-original"].append(hypernym_original)
+        dict_features["hypernym-replacement"].append(hypernym_replacement)
         dict_features["frequency-original"].append(frequency_w_original)
         dict_features["frequency-replacement"].append(frequency_w_replacement)
         dict_features["concreteness-original"].append(concreteness_w_original)
@@ -337,7 +337,7 @@ def _compute_features(clip_results: pd.DataFrame,
 
     levin_liwc = [item for sublist in dict_features["Levin-original"] + dict_features["Levin-replacement"] +
                   dict_features["LIWC-original"] + dict_features["LIWC-replacement"] for item in sublist]
-    wordnet = dict_features["WordNet-original"] + dict_features["WordNet-replacement"]
+    wordnet = dict_features["hypernym-original"] + dict_features["hypernym-replacement"]
 
     features_count = (levin_liwc + wordnet + ["neg_type-" + v for v in dict_features["neg_type"]] +
                       ["text_similarity"] * len(dict_features["text_similarity"]) +
@@ -384,8 +384,8 @@ def _transform_features_to_numbers(df: pd.DataFrame,
         ("Levin-replacement", MultiLabelBinarizer()),
         ("LIWC-original", MultiLabelBinarizer()),
         ("LIWC-replacement", MultiLabelBinarizer()),
-        ("WordNet-original", MultiLabelBinarizer()),
-        ("WordNet-replacement", MultiLabelBinarizer()),
+        ("hypernym-original", MultiLabelBinarizer()),
+        ("hypernym-replacement", MultiLabelBinarizer()),
         (["concreteness-change"], [SimpleImputer(), StandardScaler()]),
         (["concreteness-original"], [SimpleImputer(), StandardScaler()]),
         (["concreteness-replacement"], [SimpleImputer(), StandardScaler()]),
@@ -409,7 +409,7 @@ def _transform_features_to_numbers(df: pd.DataFrame,
         columns_to_remove = []
 
         for column in new_df.columns:
-            if column.startswith(("Levin-original", "LIWC-original", "WordNet-original")):
+            if column.startswith(("Levin-original", "LIWC-original", "hypernym-original")):
                 prefix = column.split("-", maxsplit=1)[0]
                 category = column.split("_", maxsplit=1)[1]
 
