@@ -195,6 +195,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    print("Disabled features:", args.feature_deny_list)
+
     raw_features, features, labels = load_features(
         path=args.input_path, max_feature_count=1000 if args.debug else None,
         feature_deny_list=args.feature_deny_list,
