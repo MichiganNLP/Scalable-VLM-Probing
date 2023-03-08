@@ -4,7 +4,8 @@ import itertools
 import json
 import string
 from collections import Counter, defaultdict
-from typing import Any, Collection, Dict, Iterable, Literal, Mapping, Optional, Sequence, Tuple, get_args
+from typing import Any, Collection, Dict, Iterable, Literal, Mapping, MutableSequence, Optional, Sequence, Tuple, \
+    get_args
 
 import numpy as np
 import pandas as pd
@@ -249,8 +250,8 @@ def _get_original_word(pos_triplet: Triplet, neg_triplet: Triplet, neg_type: Neg
         raise ValueError(f"Wrong neg_type: {neg_type}, needs to be one from {get_args(NegType)}")
 
 
-def _compute_features(clip_results: pd.DataFrame,
-                      max_feature_count: Optional[int] = None) -> pd.DataFrame:
+def _compute_features(clip_results: pd.DataFrame, do_regression: bool = True,
+                      max_feature_count: Optional[int] = None) -> Tuple[pd.DataFrame, np.ndarray]:
     if max_feature_count:
         clip_results = clip_results[:max_feature_count]
 
@@ -260,8 +261,8 @@ def _compute_features(clip_results: pd.DataFrame,
                                      "hypernym-original": [], "hypernym-replacement": [],
                                      "frequency-original": [], "frequency-replacement": [],
                                      "concreteness-original": [], "concreteness-replacement": [],
-                                     "wup_similarity": [], "lch_similarity": [], "path_similarity": [],
-                                     "nb-synsets-original": [], "nb-synsets-replacement": []}
+                                     # "wup_similarity": [], "path_similarity": [],
+                                     "lch_similarity": [], "nb-synsets-original": [], "nb-synsets-replacement": []}
 
     dict_levin = _parse_levin_file()
     dict_liwc = _parse_liwc_file()
@@ -312,7 +313,7 @@ def _compute_features(clip_results: pd.DataFrame,
         # wup_similarity = _compute_wup_similarity(word_original, word_replacement, neg_type=row.neg_type)
         lch_similarity = _compute_lch_similarity(word_original, word_replacement, neg_type=row.neg_type)
         # path_similarity = _compute_path_similarity(word_original, word_replacement, neg_type=row.neg_type)
-        wup_similarity, path_similarity = float("nan"), float("nan")
+        # wup_similarity, path_similarity = float("nan"), float("nan")
 
         nb_synsets_word_original = _get_nb_synsets(word_original, row.neg_type)
         nb_synsets_word_replacement = _get_nb_synsets(word_replacement, row.neg_type)
@@ -334,16 +335,23 @@ def _compute_features(clip_results: pd.DataFrame,
         dict_features["concreteness-replacement"].append(concreteness_w_replacement)
         dict_features["nb-synsets-original"].append(nb_synsets_word_original)
         dict_features["nb-synsets-replacement"].append(nb_synsets_word_replacement)
-        dict_features["wup_similarity"].append(wup_similarity)
+        # dict_features["wup_similarity"].append(wup_similarity)
         dict_features["lch_similarity"].append(lch_similarity)
-        dict_features["path_similarity"].append(path_similarity)
+        # dict_features["path_similarity"].append(path_similarity)
 
     embedded_original_words = text_model.encode(dict_features["word_original"], show_progress_bar=True)
     embedded_replacement_words = text_model.encode(dict_features["word_replacement"], show_progress_bar=True)
 
     dict_features["word_similarity"] = util.pairwise_cos_sim(embedded_original_words, embedded_replacement_words)
 
-    return pd.DataFrame.from_dict(dict_features)
+    df = pd.DataFrame.from_dict(dict_features)
+
+    df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
+    df["frequency-change"] = df["frequency-original"] - df["frequency-replacement"]
+
+    dependent_variable = df["clip-score-diff"] if do_regression else df["label"]
+
+    return df, dependent_variable
 
 
 # sklearn-pandas doesn't support the new way (scikit-learn >= 1.1) some transformers output the features.
@@ -365,31 +373,28 @@ def _fix_one_hot_encoder_columns(df: pd.DataFrame, mapper: DataFrameMapper) -> p
 
 def _transform_features_to_numbers(df: pd.DataFrame,
                                    merge_original_and_replacement_features: bool = True) -> pd.DataFrame:
-    df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
-    df["frequency-change"] = df["frequency-original"] - df["frequency-replacement"]
+    df = df.drop(columns=["sent", "n_sent", "neg_type", "word_original", "word_replacement", "label",
+                          "clip-score-diff"])
 
-    mapper = DataFrameMapper([
-        # (["neg_type"], OneHotEncoder(dtype=bool)),
-        ("Levin-original", MultiLabelBinarizer()),
-        ("Levin-replacement", MultiLabelBinarizer()),
-        ("LIWC-original", MultiLabelBinarizer()),
-        ("LIWC-replacement", MultiLabelBinarizer()),
-        ("hypernym-original", MultiLabelBinarizer()),
-        ("hypernym-replacement", MultiLabelBinarizer()),
-        (["concreteness-change"], [SimpleImputer(), StandardScaler()]),
-        (["concreteness-original"], [SimpleImputer(), StandardScaler()]),
-        (["concreteness-replacement"], [SimpleImputer(), StandardScaler()]),
-        (["frequency-change"], [SimpleImputer(), StandardScaler()]),
-        (["frequency-original"], [SimpleImputer(), StandardScaler()]),
-        (["frequency-replacement"], [SimpleImputer(), StandardScaler()]),
-        (["text_similarity"], [SimpleImputer(), StandardScaler()]),
-        (["word_similarity"], [SimpleImputer(), StandardScaler()]),
-        (["nb-synsets-original"], [SimpleImputer(), StandardScaler()]),
-        (["nb-synsets-replacement"], [SimpleImputer(), StandardScaler()]),
-        # (["wup_similarity"], [SimpleImputer(), StandardScaler()]),
-        (["lch_similarity"], [SimpleImputer(), StandardScaler()]),
-        # (["path_similarity"], [SimpleImputer(), StandardScaler()]),
-    ], df_out=True)
+    transformers: MutableSequence[Tuple] = []
+
+    for column_name in df.columns:
+        column = df[column_name]
+        dtype = column.dtype
+        if np.issubdtype(dtype, np.floating) or np.issubdtype(dtype, np.integer):
+            transformers.append(([column_name], [SimpleImputer(), StandardScaler()]))
+        elif dtype == object:
+            types = {type(x) for x in column}
+            if all(issubclass(t, str) for t in types):
+                transformers.append(([column_name], OneHotEncoder(dtype=bool)))
+            elif all(issubclass(t, Iterable) and not issubclass(t, str) for t in types):
+                transformers.append((column_name, MultiLabelBinarizer()))
+
+    considered_column_names = {c for t in transformers for c in (t[0] if isinstance(t[0], list) else [t[0]])}
+    if ignored_column_names := set(df.columns) - considered_column_names:
+        print("Columns ignored because their type is unsupported:", ignored_column_names)
+
+    mapper = DataFrameMapper(transformers, df_out=True)
 
     new_df = mapper.fit_transform(df)
     new_df = _fix_one_hot_encoder_columns(new_df, mapper)
@@ -398,48 +403,62 @@ def _transform_features_to_numbers(df: pd.DataFrame,
         new_columns = {}
         columns_to_remove = []
 
-        for column in new_df.columns:
-            if column.startswith(("Levin-original", "LIWC-original", "hypernym-original")):
-                prefix = column.split("-", maxsplit=1)[0]
-                category = column.split("_", maxsplit=1)[1]
+        multi_label_original_word_feature_names = [t[0]
+                                                   for t in transformers
+                                                   if (isinstance(t[1], MultiLabelBinarizer)
+                                                       and t[0].endswith("-original"))]
 
-                replacement_column_name = f"{prefix}-replacement_{category}"
+        for column in new_df.columns:
+            if column.startswith(multi_label_original_word_feature_names):
+                prefix = column.split("-", maxsplit=1)[0]
+                suffix = column.split("_", maxsplit=1)[1]
+
+                replacement_column_name = f"{prefix}-replacement_{suffix}"
                 if replacement_column_name in new_df.columns:
-                    new_columns[f"{prefix}_change_{category}"] = new_df[column] - new_df[replacement_column_name]
+                    new_columns[f"{prefix}_change_{suffix}"] = new_df[column] - new_df[replacement_column_name]
                     columns_to_remove.append(column)
                     columns_to_remove.append(replacement_column_name)
 
-        # Change them all together to avoid fragmentation.
+        # Change them all together to avoid DataFrame fragmentation.
         new_df = new_df.drop(columns_to_remove, axis="columns")
         new_df = pd.concat((new_df, pd.DataFrame.from_dict(new_columns)), axis="columns")
 
     return new_df
 
 
-def _describe_features(clip_results: pd.DataFrame, features: pd.DataFrame) -> None:
+def _describe_features(features: pd.DataFrame, dependent_variable: np.ndarray) -> None:
+    if not np.issubdtype(dependent_variable.dtype, np.floating):
+        print(f"Counter dependent variable:", Counter(dependent_variable))
+
     main_feature_names = [feature_name.split("_")[0] for feature_name in features.columns]
-    print(f"Counter all labels:", Counter(clip_results["clip prediction"].tolist()))
     print(f"Features size:", len(features.columns), "--", Counter(main_feature_names))
     print(f"Features shape:", features.shape)
 
 
 def _compute_numeric_features(clip_results: pd.DataFrame, max_feature_count: Optional[int] = None,
                               merge_original_and_replacement_features: bool = True, do_regression: bool = True,
-                              feature_min_non_zero_values: int = 50
-                              ) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
-    raw_features = _compute_features(clip_results, max_feature_count=max_feature_count)
+                              feature_min_non_zero_values: int = 50,
+                              verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
+    raw_features, dependent_variable = _compute_features(clip_results, do_regression=do_regression,
+                                                         max_feature_count=max_feature_count)
     features = _transform_features_to_numbers(
         raw_features, merge_original_and_replacement_features=merge_original_and_replacement_features)
-    features = features.loc[:, ((features != 0).sum(0) >= feature_min_non_zero_values)]
-    _describe_features(clip_results, features)
-    dependent_variable = raw_features["clip-score-diff"] if do_regression else raw_features["label"]
+
+    features_mask = (features != 0).sum(0) >= feature_min_non_zero_values
+    if (~features_mask).any():  # noqa
+        print("The following features are removed because they have too few non-zero values:",
+              features.columns[~features_mask])
+    features = features.loc[:, features_mask]
+
+    if verbose:
+        _describe_features(features, dependent_variable)
+
     return raw_features, features, dependent_variable
 
 
 def load_features(path: str, max_feature_count: Optional[int] = None,
                   merge_original_and_replacement_features: bool = True, do_regression: bool = True,
-                  feature_min_non_zero_values: int = 50,
-                  ) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
+                  feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
     clip_results = _load_clip_results(path)
     return _compute_numeric_features(
         clip_results, max_feature_count=max_feature_count,
