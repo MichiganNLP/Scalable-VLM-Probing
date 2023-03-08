@@ -340,7 +340,7 @@ def _compute_features(clip_results: pd.DataFrame,
     dict_features["clip-score-diff"] = clip_results.clip_score_diff
 
     with open("data/words_counter_LAION.json") as json_file:
-        words_counter_LAION = json.load(json_file)
+        words_counter_laion = json.load(json_file)
 
     embedded_sentences = text_model.encode(sentences, show_progress_bar=True)
     embedded_neg_sentences = text_model.encode(negative_sentences, show_progress_bar=True)
@@ -364,9 +364,8 @@ def _compute_features(clip_results: pd.DataFrame,
         liwc_category_w_original = _get_liwc_category(word_original, dict_liwc)
         liwc_category_w_replacement = _get_liwc_category(word_replacement, dict_liwc)
 
-        frequency_w_original = words_counter_LAION[word_original] if word_original in words_counter_LAION else 0
-        frequency_w_replacement = words_counter_LAION[
-            word_replacement] if word_replacement in words_counter_LAION else 0
+        frequency_w_original = words_counter_laion.get(word_original, 0)
+        frequency_w_replacement = words_counter_laion.get(word_replacement, 0)
 
         concreteness_w_original = _get_concreteness_score(word_original, dict_concreteness)
         concreteness_w_replacement = _get_concreteness_score(word_replacement, dict_concreteness)
