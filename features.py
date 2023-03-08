@@ -181,11 +181,12 @@ def _parse_liwc_file(path: str = "data/LIWC.2015.all.txt", verbose: bool = True)
     return dict_liwc
 
 
-def _get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Sequence[str]:
-    return [category
-            for key_word, categories in dict_liwc.items()
-            if key_word == word or (key_word[-1] == "*" and word.startswith(key_word[:-1]))
-            for category in categories]
+def _get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Collection[str]:
+    # The shortest word in LIWC with a wildcard is 2 characters long.
+    return {category
+            for categories in itertools.chain([dict_liwc.get(word, [])],
+                                              (dict_liwc.get(word[:i] + "*", []) for i in range(2, len(word) + 1)))
+            for category in categories}
 
 
 @functools.lru_cache
