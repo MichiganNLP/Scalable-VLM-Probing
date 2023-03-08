@@ -1,19 +1,23 @@
+from __future__ import annotations
+
 import ast
 import functools
 import itertools
 import json
 import string
 from collections import Counter, defaultdict
-from typing import Collection, Iterable, Literal, Mapping, MutableSequence, Optional, Sequence, Tuple, get_args
+from typing import Collection, Iterable, Literal, Mapping, MutableSequence, Sequence, Tuple, get_args
 
 import numpy as np
 import pandas as pd
 from nltk.corpus import wordnet
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from sentence_transformers import SentenceTransformer, util
+from sklearn.base import TransformerMixin
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardScaler
+from sklearn.preprocessing import FunctionTransformer, MultiLabelBinarizer, OneHotEncoder, StandardScaler
 from sklearn_pandas import DataFrameMapper
+from sklearn_pandas.pipeline import make_transformer_pipeline
 
 NegType = Literal["s", "v", "o"]
 Triplet = Tuple[str, str, str]
@@ -251,9 +255,8 @@ def _get_changed_word(triplet: Triplet, neg_type: NegType) -> str:
     return triplet[VALID_NEG_TYPES.index(neg_type)]
 
 
-def _compute_features(clip_results: pd.DataFrame, do_regression: bool = True,
-                      feature_deny_list: Collection[str] = frozenset(),
-                      max_feature_count: Optional[int] = None) -> Tuple[pd.DataFrame, np.ndarray]:
+def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[str] = frozenset(),
+                      max_feature_count: int | None = None) -> pd.DataFrame:
     print("Computing all the features…")
 
     if max_feature_count:
@@ -347,7 +350,7 @@ def _compute_features(clip_results: pd.DataFrame, do_regression: bool = True,
 
     print("Feature computation done.")
 
-    return df, df["clip_score_diff"] if do_regression else df["clip prediction"]
+    return df
 
 
 # sklearn-pandas doesn't support the new way (scikit-learn >= 1.1) some transformers output the features.
@@ -367,23 +370,43 @@ def _fix_one_hot_encoder_columns(df: pd.DataFrame, mapper: DataFrameMapper) -> p
     return df
 
 
-def _transform_features_to_numbers(df: pd.DataFrame,
-                                   merge_original_and_replacement_features: bool = True) -> pd.DataFrame:
-    df = df.drop(columns=["sentence", "neg_sentence", "pos_triplet", "neg_triplet", "neg_type", "word_original",
-                          "word_replacement", "clip prediction", "clip_score_diff"])
+def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True) -> TransformerMixin | None:
+    dtype = feature.dtype
+    if np.issubdtype(dtype, np.floating) or np.issubdtype(dtype, np.integer):
+        if impute_missing_values:
+            return make_transformer_pipeline(SimpleImputer(), StandardScaler())
+        else:
+            return StandardScaler()
+    elif dtype == object:
+        if all(issubclass(type(x), str) for x in feature):
+            return OneHotEncoder(dtype=bool)
+        elif is_feature_multi_label(feature):
+            return MultiLabelBinarizer()
+        else:
+            return None
+    elif is_feature_binary(feature):
+        return FunctionTransformer(lambda x: x)
+    else:
+        return None
+
+
+def _transform_features_to_numbers(
+        df: pd.DataFrame, dependent_variable_name: str, standardize_dependent_variable: bool = True,
+        merge_original_and_replacement_features: bool = True) -> Tuple[pd.DataFrame, np.ndarray]:
+    if not standardize_dependent_variable:
+        dependent_variable = df.pop(dependent_variable_name)
+
+    columns_to_drop = list({"sentence", "neg_sentence", "pos_triplet", "neg_triplet", "neg_type", "word_original",
+                            "word_replacement", "clip prediction", "clip_score_diff"} - {dependent_variable_name})
+    df = df.drop(columns=list(columns_to_drop))
 
     transformers: MutableSequence[Tuple] = []
 
     for column_name in df.columns:
-        column = df[column_name]
-        dtype = column.dtype
-        if np.issubdtype(dtype, np.floating) or np.issubdtype(dtype, np.integer):
-            transformers.append(([column_name], [SimpleImputer(), StandardScaler()]))
-        elif dtype == object:
-            if all(issubclass(type(x), str) for x in column):
-                transformers.append(([column_name], OneHotEncoder(dtype=bool)))
-            elif is_feature_multi_label(column):
-                transformers.append((column_name, MultiLabelBinarizer()))
+        impute_missing_values = column_name != dependent_variable_name
+        if transformer := _infer_transformer(df[column_name], impute_missing_values=impute_missing_values):
+            selector = column_name if isinstance(transformer, MultiLabelBinarizer) else [column_name]
+            transformers.append((selector, transformer))
 
     considered_column_names = {c for t in transformers for c in (t[0] if isinstance(t[0], list) else [t[0]])}
     if ignored_column_names := set(df.columns) - considered_column_names:
@@ -395,6 +418,9 @@ def _transform_features_to_numbers(df: pd.DataFrame,
     new_df = mapper.fit_transform(df)
     new_df = _fix_one_hot_encoder_columns(new_df, mapper)
     print(" ✓")
+
+    if standardize_dependent_variable:
+        dependent_variable = new_df.pop(dependent_variable_name)
 
     if merge_original_and_replacement_features:
         new_columns = {}
@@ -420,7 +446,7 @@ def _transform_features_to_numbers(df: pd.DataFrame,
         new_df = new_df.drop(columns_to_remove, axis="columns")
         new_df = pd.concat((new_df, pd.DataFrame.from_dict(new_columns)), axis="columns")
 
-    return new_df
+    return new_df, dependent_variable  # noqa
 
 
 def _describe_features(features: pd.DataFrame, dependent_variable: np.ndarray) -> None:
@@ -432,16 +458,16 @@ def _describe_features(features: pd.DataFrame, dependent_variable: np.ndarray) -
     print(f"Features shape:", features.shape)
 
 
-def _compute_numeric_features(clip_results: pd.DataFrame, max_feature_count: Optional[int] = None,
-                              feature_deny_list: Collection[str] = frozenset(),
-                              merge_original_and_replacement_features: bool = True, do_regression: bool = True,
-                              feature_min_non_zero_values: int = 50,
+def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_name: str,
+                              max_feature_count: int | None = None, feature_deny_list: Collection[str] = frozenset(),
+                              merge_original_and_replacement_features: bool = True,
+                              feature_min_non_zero_values: int = 50, standardize_dependent_variable: bool = True,
                               verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
-    raw_features, dependent_variable = _compute_features(clip_results, feature_deny_list=feature_deny_list,
-                                                         do_regression=do_regression,
-                                                         max_feature_count=max_feature_count)
-    features = _transform_features_to_numbers(
-        raw_features, merge_original_and_replacement_features=merge_original_and_replacement_features)
+    raw_features = _compute_features(clip_results, feature_deny_list=feature_deny_list,
+                                     max_feature_count=max_feature_count)
+    features, dependent_variable = _transform_features_to_numbers(
+        raw_features, dependent_variable_name, standardize_dependent_variable=standardize_dependent_variable,
+        merge_original_and_replacement_features=merge_original_and_replacement_features)
 
     features_mask = (features != 0).sum(0) >= feature_min_non_zero_values
     if (~features_mask).any():  # noqa
@@ -455,13 +481,15 @@ def _compute_numeric_features(clip_results: pd.DataFrame, max_feature_count: Opt
     return raw_features, features, dependent_variable
 
 
-def load_features(path: str, max_feature_count: Optional[int] = None, feature_deny_list: Collection[str] = frozenset(),
-                  merge_original_and_replacement_features: bool = True, do_regression: bool = True,
+def load_features(path: str, dependent_variable_name: str, max_feature_count: int | None = None,
+                  feature_deny_list: Collection[str] = frozenset(), standardize_dependent_variable: bool = True,
+                  merge_original_and_replacement_features: bool = True,
                   feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
     clip_results = _load_clip_results(path)
     return _compute_numeric_features(
-        clip_results, max_feature_count=max_feature_count, feature_deny_list=feature_deny_list,
-        merge_original_and_replacement_features=merge_original_and_replacement_features, do_regression=do_regression,
+        clip_results, dependent_variable_name, max_feature_count=max_feature_count, feature_deny_list=feature_deny_list,
+        standardize_dependent_variable=standardize_dependent_variable,
+        merge_original_and_replacement_features=merge_original_and_replacement_features,
         feature_min_non_zero_values=feature_min_non_zero_values)
 
 

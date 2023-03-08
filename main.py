@@ -179,6 +179,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="ols", choices=MODELS)
     parser.add_argument("--input-path", default="data/merged.csv")
+    parser.add_argument("--dependent-variable-name")
     parser.add_argument("-r", "--remove-features", dest="feature_deny_list", nargs="+",
                         default={"wup_similarity", "lch_similarity", "path_similarity"})
     parser.add_argument("--feature-min-non-zero-values", type=int, default=50)
@@ -187,6 +188,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--iterations", type=int, default=10_000, help="Only applies to the SVM model.")
     args = parser.parse_args()
 
+    args.dependent_variable_name = (args.dependent_variable_name
+                                    or ("clip_score_diff" if args.model in REGRESSION_MODELS else "clip prediction"))
     args.feature_deny_list = set(args.feature_deny_list)
 
     return args
@@ -198,10 +201,11 @@ def main() -> None:
     print("Disabled features:", args.feature_deny_list)
 
     raw_features, features, labels = load_features(
-        path=args.input_path, max_feature_count=1000 if args.debug else None,
-        feature_deny_list=args.feature_deny_list,
+        path=args.input_path, dependent_variable_name=args.dependent_variable_name,
+        max_feature_count=1000 if args.debug else None, feature_deny_list=args.feature_deny_list,
+        standardize_dependent_variable=True,
         merge_original_and_replacement_features=args.merge_original_and_replacement_features,
-        do_regression=args.model in REGRESSION_MODELS, feature_min_non_zero_values=args.feature_min_non_zero_values)
+        feature_min_non_zero_values=args.feature_min_non_zero_values)
 
     if args.model == "dominance-score":
         compute_dominance_score(features, labels)
