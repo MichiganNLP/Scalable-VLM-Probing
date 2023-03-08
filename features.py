@@ -285,9 +285,9 @@ def _compute_features(clip_results: pd.DataFrame, do_regression: bool = True,
     if "Levin" not in feature_deny_list:
         dict_levin = _parse_levin_file()
 
-        df["levin-original"] = df.apply(
+        df["Levin-original"] = df.apply(
             lambda row: _get_levin_category(row.word_original, dict_levin) if row.neg_type == "v" else [], axis=1)
-        df["levin-replacement"] = df.apply(
+        df["Levin-replacement"] = df.apply(
             lambda row: _get_levin_category(row.word_replacement, dict_levin) if row.neg_type == "v" else [], axis=1)
 
     if "LIWC" not in feature_deny_list:
@@ -380,10 +380,9 @@ def _transform_features_to_numbers(df: pd.DataFrame,
         if np.issubdtype(dtype, np.floating) or np.issubdtype(dtype, np.integer):
             transformers.append(([column_name], [SimpleImputer(), StandardScaler()]))
         elif dtype == object:
-            types = {type(x) for x in column}
-            if all(issubclass(t, str) for t in types):
+            if all(issubclass(type(x), str) for x in column):
                 transformers.append(([column_name], OneHotEncoder(dtype=bool)))
-            elif all(issubclass(t, Iterable) and not issubclass(t, str) for t in types):
+            elif is_feature_multi_label(column):
                 transformers.append((column_name, MultiLabelBinarizer()))
 
     considered_column_names = {c for t in transformers for c in (t[0] if isinstance(t[0], list) else [t[0]])}
@@ -468,3 +467,7 @@ def load_features(path: str, max_feature_count: Optional[int] = None, feature_de
 
 def is_feature_binary(feature: np.ndarray) -> bool:
     return feature.dtype == bool or (np.issubdtype(feature.dtype, np.integer) and set(np.unique(feature)) == {0, 1})
+
+
+def is_feature_multi_label(feature: np.ndarray) -> bool:
+    return all(issubclass(type(x), Iterable) and not issubclass(type(x), str) for x in feature)

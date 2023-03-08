@@ -13,7 +13,7 @@ from sklearn import svm
 from sklearn.linear_model import Ridge
 from tqdm.auto import tqdm
 
-from features import is_feature_binary, load_features
+from features import is_feature_binary, is_feature_multi_label, load_features
 
 CLASSIFICATION_MODELS = {"dominance-score", "svm"}
 REGRESSION_MODELS = {"ols", "ridge"}
@@ -119,11 +119,16 @@ def compute_ols_regression(features: pd.DataFrame, labels: np.ndarray, raw_featu
     print("Significant features:")
     print(df.to_string())
 
+    multi_label_features = {feature_name.split("-", maxsplit=1)[0]
+                            for feature_name in df.index
+                            if (feature_name.split("_", maxsplit=1)[0] in raw_features
+                                and is_feature_multi_label(raw_features[feature_name.split("_", maxsplit=1)[0]]))}
+
     print()
     print("Example words from the significant features:")
     for feature_name in df.index:
         prefix = feature_name.split("-", maxsplit=1)[0]
-        if prefix in {"LIWC", "Levin", "hypernym"}:
+        if prefix in multi_label_features:
             suffix = feature_name.split("_", maxsplit=2)[-1]
 
             original_words = raw_features[raw_features[f"{prefix}-original"].apply(
