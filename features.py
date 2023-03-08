@@ -248,7 +248,7 @@ def _compute_features(clip_results: pd.DataFrame,
     if max_feature_count:
         clip_results = clip_results[:max_feature_count]
 
-    dict_features: Dict[str, Any] = {"word_original": [], "word_replacement": [], "neg_type": [],
+    dict_features: Dict[str, Any] = {"word_original": [], "word_replacement": [],
                                      "Levin-original": [], "Levin-replacement": [],
                                      "LIWC-original": [], "LIWC-replacement": [],
                                      "hypernym-original": [], "hypernym-replacement": [],
@@ -266,6 +266,8 @@ def _compute_features(clip_results: pd.DataFrame,
 
     dict_features["sent"] = sentences
     dict_features["n_sent"] = negative_sentences
+
+    dict_features["neg_type"] = clip_results.neg_type
 
     dict_features["label"] = clip_results["clip prediction"]
     dict_features["clip-score-diff"] = clip_results.clip_score_diff
@@ -313,7 +315,6 @@ def _compute_features(clip_results: pd.DataFrame,
 
         dict_features["word_original"].append(word_original)
         dict_features["word_replacement"].append(word_replacement)
-        dict_features["neg_type"].append(row.neg_type)
         dict_features["Levin-original"].append(levin_classes_w_original)
         dict_features["Levin-replacement"].append(levin_classes_w_replacement)
         dict_features["LIWC-original"].append(liwc_category_w_original)
