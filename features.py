@@ -144,8 +144,8 @@ def _parse_levin_file(path: str = "data/levin_verbs.txt",
     return map_word_to_class_names
 
 
-def _get_levin_category(word: str, dict_levin: Mapping[str, Collection[str]]) -> Sequence[str]:
-    return list(dict_levin[word])
+def _get_levin_category(word: str, dict_levin: Mapping[str, Collection[str]]) -> Collection[str]:
+    return dict_levin[word]
 
 
 def _get_nb_synsets(word: str, neg_type: NegType) -> int:  # noqa
