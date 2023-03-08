@@ -164,7 +164,7 @@ def _get_nb_synsets(word: str, neg_type: NegType) -> int:  # noqa
 def _get_hypernyms(word: str, neg_type: NegType) -> Sequence[str]:
     pos = _neg_type_to_pos(neg_type)
     if not (synsets := wordnet.synsets(word, pos=pos)):
-        return "nan"  # FIXME: or `return [word]`?
+        return [word]
     synsets = synsets[0].hypernyms() or synsets
     broad_semantic_category = synsets[0]._lemma_names[0]
     return [broad_semantic_category]
