@@ -92,8 +92,8 @@ def _load_clip_results(path: str) -> pd.DataFrame:
 
 
 @functools.lru_cache
-def _parse_levin_file(path: str = PATH_LEVIN_VERBS,
-                      path_semantic_broad: str = PATH_LEVIN_SEMANTIC_BROAD,
+def _parse_levin_file(path: str = PATH_LEVIN_VERBS, path_semantic_broad: str = PATH_LEVIN_SEMANTIC_BROAD,
+                      return_mode: Literal["alternation", "semantic_broad", "semantic_fine_grained", "all"] = "all",
                       verbose: bool = True) -> Mapping[str, Collection[str]]:
     content = ""
     map_class_name_to_words = {}
@@ -116,9 +116,9 @@ def _parse_levin_file(path: str = PATH_LEVIN_VERBS,
     with open(path_semantic_broad) as file:
         map_class_number_to_broad_name = {int(number_str): name for number_str, name in json.load(file).items()}
 
-    # map_word_to_semantic_broad_class_names = defaultdict(set)
-    # map_word_to_semantic_fine_grained_class_names = defaultdict(set)
-    # map_word_to_alternation_class_names = defaultdict(set)
+    map_word_to_semantic_broad_class_names = defaultdict(set)
+    map_word_to_semantic_fine_grained_class_names = defaultdict(set)
+    map_word_to_alternation_class_names = defaultdict(set)
     map_word_to_class_names = defaultdict(set)
 
     semantic_broad_classes = set()
@@ -132,17 +132,17 @@ def _parse_levin_file(path: str = PATH_LEVIN_VERBS,
         if (class_number := int(class_name.split(" ", maxsplit=1)[0].split(".", maxsplit=1)[0])) <= 8:
             alternation_class_count += 1
 
-            # for word in words:
-            #     map_word_to_alternation_class_names[word].add(class_name)
+            for word in words:
+                map_word_to_alternation_class_names[word].add(class_name)
         else:
             semantic_fine_grained_class_count += 1
 
             broad_class_name = map_class_number_to_broad_name[class_number]
             semantic_broad_classes.add(broad_class_name)
 
-            # for word in words:
-            #     map_word_to_semantic_fine_grained_class_names[word].add(class_name)
-            #     map_word_to_semantic_broad_class_names[broad_class_name].update(words)
+            for word in words:
+                map_word_to_semantic_fine_grained_class_names[word].add(class_name)
+                map_word_to_semantic_broad_class_names[broad_class_name].update(words)
 
     if verbose:
         print(f"--Levin semantic broad nb classes:", len(semantic_broad_classes))
@@ -150,7 +150,16 @@ def _parse_levin_file(path: str = PATH_LEVIN_VERBS,
         print(f"--Levin alternations nb classes:", alternation_class_count)
         print(f"--Levin total nb classes:", len(map_class_name_to_words))
 
-    return map_word_to_class_names
+    if return_mode == "alternation":
+        return map_word_to_alternation_class_names
+    elif return_mode == "semantic_broad":
+        return map_word_to_semantic_broad_class_names
+    elif return_mode == "semantic_fine_grained":
+        return map_word_to_semantic_fine_grained_class_names
+    elif return_mode == "all":
+        return map_word_to_class_names
+    else:
+        raise ValueError(f"Invalid return mode: {return_mode}")
 
 
 def _get_levin_category(word: str, dict_levin: Mapping[str, Collection[str]]) -> Collection[str]:
