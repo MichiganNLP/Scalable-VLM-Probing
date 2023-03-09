@@ -263,7 +263,7 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
     print("Computing all the features…")
 
     if max_feature_count:
-        clip_results = clip_results[:max_feature_count]
+        clip_results = clip_results.sample(max_feature_count)
 
     df = clip_results.copy()
 
@@ -412,7 +412,9 @@ def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
     transformers = None
 
     dtype = feature.dtype
-    if np.issubdtype(dtype, np.floating) or np.issubdtype(dtype, np.integer):
+    if is_feature_binary(feature):
+        transformers = [SelectMinNonZero(feature_min_non_zero_values)]
+    elif np.issubdtype(dtype, np.floating) or np.issubdtype(dtype, np.integer):
         if impute_missing_values:
             transformers = [SimpleImputer(), StandardScaler()]
         else:
@@ -422,8 +424,6 @@ def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
             transformers = [OneHotEncoder(dtype=bool), SelectMinNonZero(feature_min_non_zero_values)]
         elif is_feature_multi_label(feature):
             transformers = [MultiLabelBinarizer(), SelectMinNonZero(feature_min_non_zero_values)]
-    elif is_feature_binary(feature):
-        transformers = [SelectMinNonZero(feature_min_non_zero_values)]
 
     if standardize_binary_features and (is_feature_binary(feature) or is_feature_multi_label(feature)
                                         or is_feature_string(feature)):

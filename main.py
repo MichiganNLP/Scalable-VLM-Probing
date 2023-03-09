@@ -100,10 +100,10 @@ def compute_svm_regression(features: pd.DataFrame, labels: np.ndarray, iteration
     _plot_coef_weights_svm(coef_weights, features)
 
 
-def compute_ols_regression(features: pd.DataFrame, labels: np.ndarray, raw_features: pd.DataFrame) -> None:
+def compute_ols_regression(features: pd.DataFrame, dependent_variable: np.ndarray, raw_features: pd.DataFrame) -> None:
     features = sm.add_constant(features)
 
-    model = sm.OLS(labels, features)
+    model = sm.OLS(dependent_variable, features)
     results = model.fit()
     summary = results.summary()
     print(summary)
@@ -116,23 +116,20 @@ def compute_ols_regression(features: pd.DataFrame, labels: np.ndarray, raw_featu
     df = df[df["P>|t|"] <= .05]
     df = df.sort_values(by=["coef"], ascending=False)
 
-    multi_label_features = {feature_name.split("-", maxsplit=1)[0]
+    multi_label_features = {prefix
                             for feature_name in df.index
-                            if (feature_name.split("_", maxsplit=1)[0] in raw_features
-                                and is_feature_multi_label(raw_features[feature_name.split("_", maxsplit=1)[0]]))}
+                            if ((prefix := feature_name.split("_", maxsplit=1)[0]) in raw_features
+                                and is_feature_multi_label(raw_features[prefix]))}
 
     df["Examples"] = ""
 
     for feature_name in df.index:
-        prefix = feature_name.split("-", maxsplit=1)[0]
+        prefix = feature_name.split("_", maxsplit=1)[0]
         if prefix in multi_label_features:
-            suffix = feature_name.split("_", maxsplit=2)[-1]
-
-            original_words = raw_features[raw_features[f"{prefix}-original"].apply(
-                lambda labels: suffix in labels)].word_original
-            replacement_words = raw_features[raw_features[f"{prefix}-replacement"].apply(
-                lambda labels: suffix in labels)].word_replacement
-            words = pd.concat([original_words, replacement_words])
+            suffix = feature_name.split("_", maxsplit=1)[1]
+            string_after_dash = prefix.split("-", maxsplit=1)[1]  # Should be "original" or "replacement".
+            words = raw_features[raw_features[prefix].apply(
+                lambda labels: suffix in labels)][f"word_{string_after_dash}"]
             counter = Counter(words.tolist())
 
             df.loc[feature_name, "Examples"] = ", ".join(f"{word} ({freq})" for word, freq in counter.most_common(5))
