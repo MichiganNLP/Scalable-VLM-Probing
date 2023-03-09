@@ -3,7 +3,7 @@ import argparse
 from collections import Counter
 from functools import partial
 from multiprocessing import Pool
-from typing import Tuple
+from typing import Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -100,7 +100,32 @@ def compute_svm_regression(features: pd.DataFrame, labels: np.ndarray, iteration
     _plot_coef_weights_svm(coef_weights, features)
 
 
-def compute_ols_regression(features: pd.DataFrame, dependent_variable: np.ndarray, raw_features: pd.DataFrame) -> None:
+def obtain_top_examples(feature_names: str, raw_features: pd.DataFrame, max_example_count: int = 5) -> Sequence[str]:
+    multi_label_features = {prefix
+                            for feature_name in feature_names
+                            if ((prefix := feature_name.split("_", maxsplit=1)[0]) in raw_features
+                                and is_feature_multi_label(raw_features[prefix]))}
+
+    examples = []
+
+    for feature_name in feature_names:
+        prefix = feature_name.split("_", maxsplit=1)[0]
+        if prefix in multi_label_features:
+            suffix = feature_name.split("_", maxsplit=1)[1]
+            string_after_dash = prefix.split("-", maxsplit=1)[1]  # Should be "original" or "replacement".
+            words = raw_features[raw_features[prefix].apply(
+                lambda labels: suffix in labels)][f"word_{string_after_dash}"]
+            counter = Counter(words.tolist())
+
+            examples.append(", ".join(f"{word} ({freq})" for word, freq in counter.most_common(max_example_count)))
+        else:
+            examples.append("")
+
+    return examples
+
+
+def compute_ols_regression(features: pd.DataFrame, dependent_variable: np.ndarray, raw_features: pd.DataFrame,
+                           confidence: float = .05) -> None:
     features = sm.add_constant(features)
 
     model = sm.OLS(dependent_variable, features)
@@ -113,49 +138,34 @@ def compute_ols_regression(features: pd.DataFrame, dependent_variable: np.ndarra
     table_as_html = summary.tables[1].as_html()
     df = pd.read_html(table_as_html, header=0, index_col=0)[0]
 
-    df = df[df["P>|t|"] <= .05]
+    df = df[df["P>|t|"] <= confidence]
     df = df.sort_values(by=["coef"], ascending=False)
 
-    multi_label_features = {prefix
-                            for feature_name in df.index
-                            if ((prefix := feature_name.split("_", maxsplit=1)[0]) in raw_features
-                                and is_feature_multi_label(raw_features[prefix]))}
-
-    df["Examples"] = ""
-
-    for feature_name in df.index:
-        prefix = feature_name.split("_", maxsplit=1)[0]
-        if prefix in multi_label_features:
-            suffix = feature_name.split("_", maxsplit=1)[1]
-            string_after_dash = prefix.split("-", maxsplit=1)[1]  # Should be "original" or "replacement".
-            words = raw_features[raw_features[prefix].apply(
-                lambda labels: suffix in labels)][f"word_{string_after_dash}"]
-            counter = Counter(words.tolist())
-
-            df.loc[feature_name, "Examples"] = ", ".join(f"{word} ({freq})" for word, freq in counter.most_common(5))
+    df["examples"] = obtain_top_examples(df.index, raw_features)
 
     print("Significant features:")
     print(df.to_string())
 
 
-def compute_ridge_regression(features: pd.DataFrame, labels: np.ndarray) -> None:
-    clf = Ridge(alpha=0.1)
-    clf.fit(features, labels)
-    r_squared = clf.score(features, labels)
+def compute_ridge_regression(features: pd.DataFrame, dependent_variable: np.ndarray, raw_features: pd.DataFrame,
+                             alpha: float = 0.1) -> None:
+    model = Ridge(alpha=alpha)
+    model.fit(features, dependent_variable)
+    r_squared = model.score(features, dependent_variable)
     print("Ridge regression R^2:", r_squared)
-    coef = clf.coef_
-    df = pd.DataFrame.from_dict({"features": features.columns, "coef": coef})
+    df = pd.DataFrame.from_dict({"": features.columns, "coef": model.coef_,
+                                 "examples": obtain_top_examples(features.columns, raw_features)}, orient="tight")
     df = df.sort_values(by=["coef"], ascending=False)
     print(df.to_string())
 
 
-def compute_dominance_score(features: pd.DataFrame, labels: np.ndarray) -> None:
-    assert len(features) == len(labels)
-    assert is_feature_binary(labels)
+def compute_dominance_score(features: pd.DataFrame, dependent_variable: np.ndarray) -> None:
+    assert len(features) == len(dependent_variable)
+    assert is_feature_binary(dependent_variable)
 
-    total_pos = labels.sum()
+    total_pos = dependent_variable.sum()
 
-    neg_labels = ~labels
+    neg_labels = ~dependent_variable
     total_neg = neg_labels.sum()
 
     dominance_scores = {}
@@ -163,7 +173,7 @@ def compute_dominance_score(features: pd.DataFrame, labels: np.ndarray) -> None:
     for column in features.columns:
         feature = features[column]
         if is_feature_binary(feature):
-            pos_coverage = feature[labels].sum() / total_pos
+            pos_coverage = feature[dependent_variable].sum() / total_pos
             neg_coverage = feature[neg_labels].sum() / total_neg
             dominance_scores[column] = pos_coverage / neg_coverage
 
@@ -209,7 +219,7 @@ def main() -> None:
     elif args.model == "ols":
         compute_ols_regression(features, labels, raw_features)
     elif args.model == "ridge":
-        compute_ridge_regression(features, labels)
+        compute_ridge_regression(features, labels, raw_features)
     elif args.model == "svm":
         compute_svm_regression(features, labels, iterations=args.iterations)
     else:
