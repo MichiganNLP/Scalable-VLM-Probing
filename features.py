@@ -13,8 +13,12 @@ import pandas as pd
 from nltk.corpus import wordnet
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from sentence_transformers import SentenceTransformer, util
+from sklearn.base import BaseEstimator
+from sklearn.feature_selection import SelectorMixin
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import FunctionTransformer, MultiLabelBinarizer, OneHotEncoder, StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardScaler
+from sklearn.utils.validation import check_is_fitted
 from sklearn_pandas import DataFrameMapper
 
 NegType = Literal["s", "v", "o"]
@@ -353,9 +357,10 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
 
 # sklearn-pandas doesn't support the new way (scikit-learn >= 1.1) some transformers output the features.
 # See https://github.com/scikit-learn-contrib/sklearn-pandas/pull/248
-def _fix_one_hot_encoder_columns(df: pd.DataFrame, mapper: DataFrameMapper) -> pd.DataFrame:
+def _fix_column_names(df: pd.DataFrame, mapper: DataFrameMapper) -> pd.DataFrame:
     for columns, transformer, kwargs in mapper.built_features:
-        if isinstance(transformer, OneHotEncoder):
+        if (isinstance(transformer, OneHotEncoder)
+                or (isinstance(transformer, Pipeline) and any(isinstance(t, OneHotEncoder) for t in transformer))):
             assert isinstance(columns, Iterable) and not isinstance(columns, str)
 
             new_names = transformer.get_feature_names_out(columns)
@@ -364,12 +369,45 @@ def _fix_one_hot_encoder_columns(df: pd.DataFrame, mapper: DataFrameMapper) -> p
             old_names = [f"{old_name_prefix}_{i}" for i in range(len(new_names))]
 
             df = df.rename(columns=dict(zip(old_names, new_names)))
+        elif isinstance(transformer, Pipeline) and isinstance(transformer[0], MultiLabelBinarizer):
+            # The way sklearn-pandas infers the names is by iterating the transformers and getting the names and trying
+            # to get the features names that are available from the last one that has them. Then, it checks if their
+            # length matches the output number of features. However, if the binarizer is followed by feature selection,
+            # this process fails as the previous condition is not met. So we handle it manually here.
+            assert isinstance(columns, str)
+
+            # MultiLabelBinarizer doesn't implement `get_feature_names_out`.
+            new_names = [f"{columns}_{c}" for c in transformer[0].classes_]
+
+            # We slice as an iterator and not by passing a slice to `__getitem__` because if the transformer is of type
+            # `TransformerPipeline` then it fails.
+            for t in itertools.islice(transformer, 1, None):
+                new_names = t.get_feature_names_out(new_names)
+
+            old_name_prefix = kwargs.get("alias", columns)
+            old_names = [f"{old_name_prefix}_{i}" for i in range(len(new_names))]
+
+            df = df.rename(columns=dict(zip(old_names, new_names)))
 
     return df
 
 
+class SelectMinNonZero(SelectorMixin, BaseEstimator):
+    def __init__(self, feature_min_non_zero_values: int = 50) -> None:
+        self.feature_min_non_zero_values = feature_min_non_zero_values
+
+    def fit(self, X: np.ndarray, y: np.ndarray | None = None) -> SelectMinNonZero:  # noqa
+        assert not np.issubdtype(X.dtype, np.floating)
+        self.non_zero_counts_ = (X != 0).sum(axis=0)  # noqa
+        return self
+
+    def _get_support_mask(self) -> np.ndarray:
+        check_is_fitted(self)
+        return self.non_zero_counts_ >= self.feature_min_non_zero_values  # noqa
+
+
 def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
-                       standardize_binary_features: bool = True) -> Any:
+                       standardize_binary_features: bool = True, feature_min_non_zero_values: int = 50) -> Any:
     transformers = None
 
     dtype = feature.dtype
@@ -380,11 +418,11 @@ def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
             transformers = [StandardScaler()]
     elif dtype == object:
         if is_feature_string(feature):
-            transformers = [OneHotEncoder(dtype=bool)]
+            transformers = [OneHotEncoder(dtype=bool), SelectMinNonZero(feature_min_non_zero_values)]
         elif is_feature_multi_label(feature):
-            transformers = [MultiLabelBinarizer()]
+            transformers = [MultiLabelBinarizer(), SelectMinNonZero(feature_min_non_zero_values)]
     elif is_feature_binary(feature):
-        transformers = [FunctionTransformer(lambda x: x)]
+        transformers = [SelectMinNonZero(feature_min_non_zero_values)]
 
     if standardize_binary_features and (is_feature_binary(feature) or is_feature_multi_label(feature)
                                         or is_feature_string(feature)):
@@ -395,7 +433,7 @@ def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
 
 def _transform_features_to_numbers(
         df: pd.DataFrame, dependent_variable_name: str, standardize_dependent_variable: bool = True,
-        standardize_binary_features: bool = True,
+        standardize_binary_features: bool = True, feature_min_non_zero_values: int = 50,
         merge_original_and_replacement_features: bool = True) -> Tuple[pd.DataFrame, np.ndarray]:
     if not standardize_dependent_variable:
         dependent_variable = df.pop(dependent_variable_name)
@@ -410,7 +448,8 @@ def _transform_features_to_numbers(
         column = df[column_name]
         impute_missing_values = column_name != dependent_variable_name
         if transformer := _infer_transformer(column, impute_missing_values=impute_missing_values,
-                                             standardize_binary_features=standardize_binary_features):
+                                             standardize_binary_features=standardize_binary_features,
+                                             feature_min_non_zero_values=feature_min_non_zero_values):
             selector = column_name if is_feature_multi_label(column) else [column_name]
             transformers.append((selector, transformer))
 
@@ -422,7 +461,7 @@ def _transform_features_to_numbers(
 
     print("Transforming the features into numbers…", end="")
     new_df = mapper.fit_transform(df)
-    new_df = _fix_one_hot_encoder_columns(new_df, mapper)
+    new_df = _fix_column_names(new_df, mapper)
     print(" ✓")
 
     if standardize_dependent_variable:
@@ -455,12 +494,12 @@ def _transform_features_to_numbers(
 
 
 def _describe_features(features: pd.DataFrame, dependent_variable: np.ndarray) -> None:
-    if not np.issubdtype(dependent_variable.dtype, np.floating):
-        print(f"Dependent variable value counts:", Counter(dependent_variable))
-
     main_feature_names = [feature_name.split("_")[0] for feature_name in features.columns]
     print(f"Features size:", len(features.columns), "--", Counter(main_feature_names))
     print(f"Features shape:", features.shape)
+
+    if not np.issubdtype(dependent_variable.dtype, np.floating):
+        print(f"Dependent variable value counts:", Counter(dependent_variable))
 
 
 def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_name: str,
@@ -474,13 +513,8 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
     features, dependent_variable = _transform_features_to_numbers(
         raw_features, dependent_variable_name, standardize_dependent_variable=standardize_dependent_variable,
         standardize_binary_features=standardize_binary_features,
+        feature_min_non_zero_values=feature_min_non_zero_values,
         merge_original_and_replacement_features=merge_original_and_replacement_features)
-
-    features_mask = (features != 0).sum(0) >= feature_min_non_zero_values
-    if (~features_mask).any():  # noqa
-        print("The following features are removed because they have too few non-zero values:",
-              features.columns[~features_mask])
-    features = features.loc[:, features_mask]
 
     if verbose:
         _describe_features(features, dependent_variable)
