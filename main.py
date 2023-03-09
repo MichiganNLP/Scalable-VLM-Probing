@@ -1,9 +1,11 @@
 #!/usr/bin/env python
+from __future__ import annotations
+
 import argparse
 from collections import Counter
 from functools import partial
 from multiprocessing import Pool
-from typing import Sequence, Tuple
+from typing import Literal, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,6 +13,7 @@ import pandas as pd
 import statsmodels.api as sm
 from sklearn import svm
 from sklearn.linear_model import Ridge
+from statsmodels.regression.linear_model import RegressionResults
 from tqdm.auto import tqdm
 
 from features import is_feature_binary, is_feature_multi_label, load_features
@@ -125,25 +128,34 @@ def obtain_top_examples(feature_names: str, raw_features: pd.DataFrame, max_exam
 
 
 def compute_ols_regression(features: pd.DataFrame, dependent_variable: np.ndarray, raw_features: pd.DataFrame,
-                           confidence: float = .05) -> None:
+                           confidence: float = .95, regularization: Literal["ridge", "lasso"] | None = None,
+                           alpha: float = 0.1) -> None:
     features = sm.add_constant(features)
 
     model = sm.OLS(dependent_variable, features)
-    results = model.fit()
-    summary = results.summary()
-    print(summary)
-    print()
-    print()
 
-    table_as_html = summary.tables[1].as_html()
-    df = pd.read_html(table_as_html, header=0, index_col=0)[0]
+    if regularization:
+        results = model.fit_regularized(L1_wt=0 if regularization == "ridge" else 1, alpha=alpha)
+        print("R^2:", RegressionResults(model, results.params).rsquared)
+        df = pd.DataFrame.from_dict({"": features.columns, "coef": results.params})
+        df = df.set_index("")
+    else:
+        results = model.fit()
+        summary = results.summary()
+        print(summary)
 
-    df = df[df["P>|t|"] <= confidence]
+        table_as_html = summary.tables[1].as_html()
+        df = pd.read_html(table_as_html, header=0, index_col=0)[0]
+        df = df[df["P>|t|"] <= (1 - confidence)]
+
+        print()
+        print()
+        print("Significant features:")
+
     df = df.sort_values(by=["coef"], ascending=False)
 
     df["examples"] = obtain_top_examples(df.index, raw_features)
 
-    print("Significant features:")
     print(df.to_string())
 
 
@@ -151,10 +163,10 @@ def compute_ridge_regression(features: pd.DataFrame, dependent_variable: np.ndar
                              alpha: float = 0.1) -> None:
     model = Ridge(alpha=alpha)
     model.fit(features, dependent_variable)
-    r_squared = model.score(features, dependent_variable)
-    print("Ridge regression R^2:", r_squared)
+    print("R^2:", model.score(features, dependent_variable))
     df = pd.DataFrame.from_dict({"": features.columns, "coef": model.coef_,
-                                 "examples": obtain_top_examples(features.columns, raw_features)}, orient="tight")
+                                 "examples": obtain_top_examples(features.columns, raw_features)})
+    df = df.set_index("")
     df = df.sort_values(by=["coef"], ascending=False)
     print(df.to_string())
 
