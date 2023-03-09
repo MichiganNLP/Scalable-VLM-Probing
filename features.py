@@ -70,7 +70,8 @@ def _preprocess_sentences(sentences: pd.Series) -> pd.Series:
 
 def _load_clip_results(path: str) -> pd.DataFrame:
     df = pd.read_csv(path, usecols=["sentence", "neg_sentence", "pos_triplet", "neg_triplet", "neg_type",
-                                    "clip prediction", "clip_score_diff"]).sort_index()
+                                    "clip prediction", "clip_score_diff", "pos_clip_score",
+                                    "neg_clip_score"]).sort_index()
 
     df.sentence = _preprocess_sentences(df.sentence)
     df.neg_sentence = _preprocess_sentences(df.neg_sentence)
@@ -439,7 +440,8 @@ def _transform_features_to_numbers(
         dependent_variable = df.pop(dependent_variable_name)
 
     columns_to_drop = list({"sentence", "neg_sentence", "pos_triplet", "neg_triplet", "neg_type", "word_original",
-                            "word_replacement", "clip prediction", "clip_score_diff"} - {dependent_variable_name})
+                            "word_replacement", "clip prediction", "clip_score_diff", "pos_clip_score",
+                            "neg_clip_score"} - {dependent_variable_name})
     df = df.drop(columns=list(columns_to_drop))
 
     transformers: MutableSequence[Tuple] = []
