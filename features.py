@@ -423,7 +423,8 @@ def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
             transformers = [StandardScaler()]
     elif dtype == object:
         if is_feature_string(feature):
-            transformers = [OneHotEncoder(dtype=bool), SelectMinNonZero(feature_min_non_zero_values)]
+            transformers = [OneHotEncoder(dtype=bool, sparse=not standardize_binary_features),
+                            SelectMinNonZero(feature_min_non_zero_values)]
         elif is_feature_multi_label(feature):
             transformers = [MultiLabelBinarizer(), SelectMinNonZero(feature_min_non_zero_values)]
 
