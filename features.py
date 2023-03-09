@@ -400,6 +400,8 @@ class SelectMinNonZero(SelectorMixin, BaseEstimator):
     def fit(self, X: np.ndarray, y: np.ndarray | None = None) -> SelectMinNonZero:  # noqa
         assert not np.issubdtype(X.dtype, np.floating)
         self.non_zero_counts_ = (X != 0).sum(axis=0)  # noqa
+        if isinstance(self.non_zero_counts_, np.matrix):  # Can happen with CSR matrices.
+            self.non_zero_counts_ = self.non_zero_counts_.A1  # noqa
         return self
 
     def _get_support_mask(self) -> np.ndarray:
