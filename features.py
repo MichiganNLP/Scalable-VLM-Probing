@@ -442,7 +442,7 @@ def _transform_features_to_numbers(
     if not standardize_dependent_variable:
         dependent_variable = df.pop(dependent_variable_name)
 
-    columns_to_drop = list({"sentence", "neg_sentence", "pos_triplet", "neg_triplet", "neg_type", "word_original",
+    columns_to_drop = list({"sentence", "neg_sentence", "pos_triplet", "neg_triplet", "word_original",
                             "word_replacement", "clip prediction", "clip_score_diff", "pos_clip_score",
                             "neg_clip_score"} - {dependent_variable_name})
     df = df.drop(columns=list(columns_to_drop))
