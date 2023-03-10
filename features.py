@@ -446,13 +446,16 @@ def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
 def _transform_features_to_numbers(
         df: pd.DataFrame, dependent_variable_name: str, standardize_dependent_variable: bool = True,
         standardize_binary_features: bool = True, feature_min_non_zero_values: int = 50,
-        merge_original_and_replacement_features: bool = True) -> Tuple[pd.DataFrame, np.ndarray]:
+        merge_original_and_replacement_features: bool = True, verbose: bool = True) -> Tuple[pd.DataFrame, np.ndarray]:
     if not standardize_dependent_variable:
         dependent_variable = df.pop(dependent_variable_name)
 
     columns_to_drop = list({"sentence", "neg_sentence", "pos_triplet", "neg_triplet", "clip prediction",
                             "clip_score_diff", "pos_clip_score", "neg_clip_score"} - {dependent_variable_name})
     df = df.drop(columns=list(columns_to_drop))
+
+    if verbose:
+        print("Number of features before transforming them into numerical:", len(df.columns))
 
     transformers: MutableSequence[Tuple] = []
 
