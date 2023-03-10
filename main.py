@@ -112,25 +112,28 @@ def obtain_top_examples(feature_names: str, raw_features: pd.DataFrame, max_exam
     examples = []
 
     for feature_name in feature_names:
-        main_feature_name = feature_name.split("_", maxsplit=1)[0]
-        if main_feature_name in multi_label_features:
-            label = feature_name.split("_", maxsplit=1)[1]
+        underscore_split = feature_name.split("_", maxsplit=1)
+        if (main_feature_name := underscore_split[0]) in multi_label_features:
+            label = underscore_split[1]
 
             word_type = main_feature_name.split("-", maxsplit=1)[1]
-            assert word_type in {"original", "replacement", "common"}
+            if word_type in {"common", "original", "replacement"}:
+                mask = raw_features[main_feature_name].map(lambda labels: label in labels)
+                rows_with_label = raw_features[mask]
+                if word_type == "common":
+                    # We could also do `rows_with_label["words-common"].explode()`, but this is likely faster:
+                    words = (word for word_set in rows_with_label["words-common"] for word in word_set)
+                else:
+                    words = rows_with_label[f"word-{word_type}"]
+                counter = Counter(words)
 
-            mask = raw_features[main_feature_name].map(lambda labels: label in labels)
-            rows_with_label = raw_features[mask]
-            if word_type == "common":
-                # We could also do `rows_with_label["words-common"].explode()`, but this is likely faster:
-                words = (word for word_set in rows_with_label["words-common"] for word in word_set)
+                examples_str = ", ".join(f"{word} ({freq})" for word, freq in counter.most_common(max_example_count))
             else:
-                words = rows_with_label[f"word-{word_type}"]
-            counter = Counter(words)
-
-            examples.append(", ".join(f"{word} ({freq})" for word, freq in counter.most_common(max_example_count)))
+                examples_str = ""
         else:
-            examples.append("")
+            examples_str = ""
+
+        examples.append(examples_str)
 
     return examples
 
