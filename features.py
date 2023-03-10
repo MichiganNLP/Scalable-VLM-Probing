@@ -335,47 +335,47 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         _compute_feature_for_each_word(df, "concreteness", lambda w, _: _get_concreteness_score(w, dict_concreteness),
                                        compute_neg_features=compute_neg_features)
 
-    if "nb_synsets" not in feature_deny_list:
+    if "nb-synsets" not in feature_deny_list:
         print("Computing the number of synsets…", end="")
-        _compute_feature_for_each_word(df, "nb_synsets", lambda w, row: _get_nb_synsets(w, row.neg_type),
+        _compute_feature_for_each_word(df, "nb-synsets", lambda w, row: _get_nb_synsets(w, row.neg_type),
                                        compute_neg_features=compute_neg_features)
         print(" ✓")
 
     # Similarity features:
 
-    if "text_similarity" not in feature_deny_list and compute_neg_features:
+    if "text-similarity" not in feature_deny_list and compute_neg_features:
         print("Computing the text similarity…")
 
         embedded_sentences = text_model.encode(df.sentence.array, show_progress_bar=True)
         embedded_neg_sentences = text_model.encode(df.neg_sentence.array, show_progress_bar=True)
 
-        df["text_similarity"] = util.pairwise_cos_sim(embedded_sentences, embedded_neg_sentences)
+        df["text-similarity"] = util.pairwise_cos_sim(embedded_sentences, embedded_neg_sentences)
         # We set the similarity to NaN for empty sentences:
-        df.loc[[s == "" for s in df.neg_sentence], "text_similarity"] = float("nan")
+        df.loc[[s == "" for s in df.neg_sentence], "text-similarity"] = float("nan")
 
-    if "word_similarity" not in feature_deny_list and compute_neg_features:
+    if "word-similarity" not in feature_deny_list and compute_neg_features:
         print("Computing the word similarity…")
 
         embedded_original_words = text_model.encode(df["word-original"].array, show_progress_bar=True)
         embedded_replacement_words = text_model.encode(df["word-replacement"].array, show_progress_bar=True)
 
-        df["word_similarity"] = util.pairwise_cos_sim(embedded_original_words, embedded_replacement_words)
+        df["word-similarity"] = util.pairwise_cos_sim(embedded_original_words, embedded_replacement_words)
 
-    if "wup_similarity" not in feature_deny_list and compute_neg_features:
+    if "wup-similarity" not in feature_deny_list and compute_neg_features:
         print("Computing the Wu-Palmer similarity…", end="")
-        df["wup_similarity"] = df.apply(
+        df["wup-similarity"] = df.apply(
             lambda row: _compute_wup_similarity(row["word-original"], row["word-replacement"], row.neg_type), axis=1)
         print(" ✓")
 
-    if "lch_similarity" not in feature_deny_list and compute_neg_features:
+    if "lch-similarity" not in feature_deny_list and compute_neg_features:
         print("Computing the Leacock-Chodorow similarity…", end="")
-        df["lch_similarity"] = df.apply(
+        df["lch-similarity"] = df.apply(
             lambda row: _compute_lch_similarity(row["word-original"], row["word-replacement"], row.neg_type), axis=1)
         print(" ✓")
 
-    if "path_similarity" not in feature_deny_list and compute_neg_features:
+    if "path-similarity" not in feature_deny_list and compute_neg_features:
         print("Computing the Path similarity…", end="")
-        df["path_similarity"] = df.apply(
+        df["path-similarity"] = df.apply(
             lambda row: _compute_path_similarity(row["word-original"], row["word-replacement"], row.neg_type), axis=1)
         print(" ✓")
 

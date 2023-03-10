@@ -245,7 +245,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input-path", default="data/merged.csv")
     parser.add_argument("--dependent-variable-name")
     parser.add_argument("-r", "--remove-features", dest="feature_deny_list", nargs="+",
-                        default={"wup_similarity", "lch_similarity", "path_similarity"})
+                        default={"wup-similarity", "lch-similarity", "path-similarity"})
     parser.add_argument("--feature-min-non-zero-values", type=int, default=50)
     parser.add_argument("--no-neg-features", dest="compute_neg_features", action="store_false")
     parser.add_argument("--merge-original-and-replacement-features", action="store_true")
