@@ -98,10 +98,11 @@ def _analyze_coef_weights_svm(features: pd.DataFrame, labels: np.ndarray,
     return coef_weights, coef_significance, coef_sign
 
 
-def compute_svm_regression(features: pd.DataFrame, labels: np.ndarray, iterations: int) -> None:
+def compute_svm_regression(features: pd.DataFrame, labels: np.ndarray, iterations: int = 10_000) -> pd.DataFrame:
     coef_weights, coef_significance, coef_sign = _analyze_coef_weights_svm(features, labels, iterations)
     _print_sorted_coef_weights_svm(coef_weights, coef_significance, coef_sign, features)
     _plot_coef_weights_svm(coef_weights, features)
+    return pd.DataFrame(coef_weights, columns=["coef"], index=features.columns)
 
 
 def _value_contains_label(v: Any, label: str) -> bool:
@@ -114,7 +115,8 @@ def _value_contains_label(v: Any, label: str) -> bool:
 
 
 def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_features: pd.DataFrame,
-                                           max_word_count: int = 5) -> Tuple[Sequence[str], Sequence[str]]:
+                                           max_word_count: int = 5,
+                                           sample: bool = False) -> Tuple[Sequence[str], Sequence[str]]:
     multi_label_features = {main_feature_name
                             for feature_name in feature_names
                             if ((main_feature_name := feature_name.split("_", maxsplit=1)[0]) in raw_features
@@ -123,7 +125,7 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
     examples = []
     co_occurrence_examples = []
 
-    for feature_name in feature_names:
+    for feature_name in tqdm(feature_names, desc="Computing examples and co-occurrences"):
         underscore_split = feature_name.split("_", maxsplit=1)
         if (main_feature_name := underscore_split[0]) in multi_label_features:
             label = underscore_split[1]
@@ -132,6 +134,10 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
             if word_type in {"common", "original", "replacement"}:
                 mask = raw_features[main_feature_name].map(lambda labels: label in labels)
                 rows_with_label = raw_features[mask]
+
+                if sample:
+                    rows_with_label = rows_with_label.sample(n=max_word_count)
+
                 if word_type == "common":
                     lists_of_words_with_label = rows_with_label.apply(
                         lambda row: [w
@@ -172,9 +178,8 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
     return examples, co_occurrence_examples
 
 
-def compute_ols_regression(features: pd.DataFrame, dependent_variable: np.ndarray, raw_features: pd.DataFrame,
-                           confidence: float = .95, regularization: Literal["ridge", "lasso"] | None = None,
-                           alpha: float = 0.1) -> None:
+def compute_ols_regression(features: pd.DataFrame, dependent_variable: np.ndarray, confidence: float = .95,
+                           regularization: Literal["ridge", "lasso"] | None = None, alpha: float = 0.1) -> pd.DataFrame:
     features = sm.add_constant(features)
 
     model = sm.OLS(dependent_variable, features)
@@ -182,7 +187,7 @@ def compute_ols_regression(features: pd.DataFrame, dependent_variable: np.ndarra
     if regularization:
         results = model.fit_regularized(L1_wt=0 if regularization == "ridge" else 1, alpha=alpha)
         print("R^2:", RegressionResults(model, results.params).rsquared)
-        df = pd.DataFrame.from_dict({"": features.columns, "coef": results.params}).set_index("")
+        df = pd.DataFrame(results.params, columns=["coef"], index=features.columns)
     else:
         results = model.fit()
         summary = results.summary()
@@ -196,27 +201,18 @@ def compute_ols_regression(features: pd.DataFrame, dependent_variable: np.ndarra
         print()
         print(f"Features whose coefficient is significantly different from zero ({len(df)}):")
 
-    df = df.sort_values(by=["coef"], ascending=False)
-
-    df["examples"], df["co-occurring word examples"] = obtain_top_examples_and_co_occurrences(df.index, raw_features)
-
-    print(df.to_string())
+    return df
 
 
-def compute_ridge_regression(features: pd.DataFrame, dependent_variable: np.ndarray, raw_features: pd.DataFrame,
-                             alpha: float = 0.1) -> None:
+def compute_ridge_regression(features: pd.DataFrame, dependent_variable: np.ndarray,
+                             alpha: float = 0.1) -> pd.DataFrame:
     model = Ridge(alpha=alpha)
     model.fit(features, dependent_variable)
     print("R^2:", model.score(features, dependent_variable))
-    examples, co_occurring_examples = obtain_top_examples_and_co_occurrences(features.columns, raw_features)
-    df = pd.DataFrame.from_dict({"": features.columns, "coef": model.coef_, "examples": examples,
-                                 "co-occurring word examples": co_occurring_examples})
-    df = df.set_index("")
-    df = df.sort_values(by=["coef"], ascending=False)
-    print(df.to_string())
+    return pd.DataFrame(model.coef_, columns=["coef"], index=features.columns)
 
 
-def compute_dominance_score(features: pd.DataFrame, dependent_variable: np.ndarray, raw_features: pd.DataFrame) -> None:
+def compute_dominance_score(features: pd.DataFrame, dependent_variable: np.ndarray) -> pd.DataFrame:
     assert len(features) == len(dependent_variable)
     assert is_feature_binary(dependent_variable)
 
@@ -234,12 +230,7 @@ def compute_dominance_score(features: pd.DataFrame, dependent_variable: np.ndarr
             neg_coverage = feature[neg_labels].sum() / total_neg
             dominance_scores[column] = pos_coverage / neg_coverage
 
-    examples, co_occurring_examples = obtain_top_examples_and_co_occurrences(dominance_scores.keys(), raw_features)
-    df = pd.DataFrame.from_dict({"": dominance_scores.keys(), "dominance score": dominance_scores.values(),
-                                 "examples": examples,
-                                 "co-occurring word examples": co_occurring_examples}).set_index("")
-    df = df.sort_values(by=["dominance score"], ascending=False)
-    print(df.to_string())
+    return pd.DataFrame(dominance_scores.values(), columns=["coef"], index=dominance_scores.keys())  # noqa
 
 
 def parse_args() -> argparse.Namespace:
@@ -254,6 +245,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--merge-original-and-replacement-features", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--iterations", type=int, default=10_000, help="Only applies to the SVM model.")
+    parser.add_argument("--examples", choices=["top", "sample", "disabled"], default="top")
     args = parser.parse_args()
 
     args.dependent_variable_name = (args.dependent_variable_name
@@ -282,15 +274,24 @@ def main() -> None:
         feature_min_non_zero_values=args.feature_min_non_zero_values)
 
     if args.model == "dominance-score":
-        compute_dominance_score(features, dependent_variable, raw_features)
+        df = compute_dominance_score(features, dependent_variable)
     elif args.model == "ols":
-        compute_ols_regression(features, dependent_variable, raw_features)
+        df = compute_ols_regression(features, dependent_variable)
     elif args.model == "ridge":
-        compute_ridge_regression(features, dependent_variable, raw_features)
+        df = compute_ridge_regression(features, dependent_variable)
     elif args.model == "svm":
-        compute_svm_regression(features, dependent_variable, iterations=args.iterations)
+        df = compute_svm_regression(features, dependent_variable, iterations=args.iterations)
     else:
         raise ValueError(f"Unknown model: {args.model} (should be in {MODELS}).")
+
+    df = df.sort_values(by=["coef"], ascending=False)
+
+    if args.examples != "disabled":
+        (df["examples"],
+         df["co-occurring word examples"]) = obtain_top_examples_and_co_occurrences(df.index, raw_features,
+                                                                                    sample=args.examples == "sample")
+
+    print(df.to_string())
 
 
 if __name__ == "__main__":
