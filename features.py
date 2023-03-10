@@ -271,6 +271,9 @@ def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable
     df[f"{prefix}-replacement"] = df.apply(lambda row: func(row.word_replacement, row), axis=1)
     # df[f"{prefix}-common"] = df.apply(lambda row: func(row.words_common, row), axis=1)
 
+    if np.issubdtype(df[f"{prefix}-original"], np.number):
+        df[f"{prefix}-change"] = df[f"{prefix}-original"] - df[f"{prefix}-replacement"]
+
 
 def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[str] = frozenset(),
                       max_feature_count: int | None = None) -> pd.DataFrame:
@@ -321,12 +324,10 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         with open(PATH_WORD_FREQUENCIES) as json_file:
             word_frequencies = json.load(json_file)
         _compute_feature_for_each_word(df, "frequency", lambda w, _: word_frequencies.get(w, 0))
-        df["frequency-change"] = df["frequency-original"] - df["frequency-replacement"]
 
     if "concreteness" not in feature_deny_list:
         dict_concreteness = _parse_concreteness_file()
         _compute_feature_for_each_word(df, "concreteness", lambda w, _: _get_concreteness_score(w, dict_concreteness))
-        df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
 
     if "wup_similarity" not in feature_deny_list:
         print("Computing the Wu-Palmer similarity…", end="")
@@ -416,7 +417,7 @@ def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
     dtype = feature.dtype
     if is_feature_binary(feature):
         transformers = [SelectMinNonZero(feature_min_non_zero_values)]
-    elif np.issubdtype(dtype, np.floating) or np.issubdtype(dtype, np.integer):
+    elif np.issubdtype(dtype, np.number):
         if impute_missing_values:
             transformers = [SimpleImputer(), StandardScaler()]
         else:
@@ -443,7 +444,7 @@ def _transform_features_to_numbers(
         dependent_variable = df.pop(dependent_variable_name)
 
     columns_to_drop = list({"sentence", "neg_sentence", "pos_triplet", "neg_triplet", "word_original",
-                            "word_replacement", "clip prediction", "clip_score_diff", "pos_clip_score",
+                            "word_replacement", "words_common", "clip prediction", "clip_score_diff", "pos_clip_score",
                             "neg_clip_score"} - {dependent_variable_name})
     df = df.drop(columns=list(columns_to_drop))
 
@@ -487,9 +488,12 @@ def _transform_features_to_numbers(
 
                 replacement_column_name = f"{prefix}-replacement_{suffix}"
                 if replacement_column_name in new_df.columns:
+                    # FIXME: this calculation should be done before standardization, otherwise it's wrong.
                     new_columns[f"{prefix}-change_{suffix}"] = new_df[column] - new_df[replacement_column_name]
                     columns_to_remove.append(column)
                     columns_to_remove.append(replacement_column_name)
+
+        # FIXME: these "change" columns should also be standardized if the other ones also were standardized.
 
         # Change them all together to avoid DataFrame fragmentation.
         new_df = new_df.drop(columns_to_remove, axis="columns")
