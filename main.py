@@ -45,9 +45,9 @@ def _print_sorted_coef_weights_svm(coef: np.ndarray, coef_significance: np.ndarr
     sorted_coefficients = [np.round(weight, 2) for weight in coef[sorted_coefficients_idx]]
 
     feature_names = features.columns
-    sorted_feature_names = feature_names[sorted_coefficients_idx].tolist()
-    sorted_feature_significance = coef_significance[sorted_coefficients_idx].tolist()
-    sorted_feature_sign = coef_sign[sorted_coefficients_idx].tolist()
+    sorted_feature_names = feature_names[sorted_coefficients_idx].array
+    sorted_feature_significance = coef_significance[sorted_coefficients_idx].array
+    sorted_feature_sign = coef_sign[sorted_coefficients_idx].array
 
     sorted_features = features[sorted_feature_names]
     sorted_feature_counts = (sorted_features != 0 & sorted_features.notna()).sum(axis=0)
@@ -122,10 +122,10 @@ def obtain_top_examples(feature_names: str, raw_features: pd.DataFrame, max_exam
             mask = raw_features[main_feature_name].map(lambda labels: label in labels)
             rows_with_label = raw_features[mask]
             if word_type == "common":
-                # We could also do `rows_with_label["words_common"].explode()`, but this is likely faster:
-                words = (word for word_set in rows_with_label["words_common"] for word in word_set)
+                # We could also do `rows_with_label["words-common"].explode()`, but this is likely faster:
+                words = (word for word_set in rows_with_label["words-common"] for word in word_set)
             else:
-                words = rows_with_label[f"word_{word_type}"]
+                words = rows_with_label[f"word-{word_type}"]
             counter = Counter(words)
 
             examples.append(", ".join(f"{word} ({freq})" for word, freq in counter.most_common(max_example_count)))
