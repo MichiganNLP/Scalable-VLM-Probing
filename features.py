@@ -6,7 +6,7 @@ import itertools
 import json
 import string
 from collections import Counter, defaultdict
-from typing import Any, Collection, Iterable, Literal, Mapping, MutableSequence, Sequence, Tuple, get_args
+from typing import Any, Callable, Collection, Iterable, Literal, Mapping, MutableSequence, Sequence, Tuple, get_args
 
 import numpy as np
 import pandas as pd
@@ -167,8 +167,8 @@ def _parse_levin_file(path: str = PATH_LEVIN_VERBS, path_semantic_broad: str = P
         raise ValueError(f"Invalid return mode: {return_mode}")
 
 
-def _get_levin_category(word: str, dict_levin: Mapping[str, Collection[str]]) -> Collection[str]:
-    return dict_levin.get(word, [])
+def _get_levin_category(word: str, dict_levin: Mapping[str, Collection[str]], neg_type: NegType) -> Collection[str]:
+    return dict_levin.get(word, []) if neg_type == "v" else []
 
 
 def _get_nb_synsets(word: str, neg_type: NegType) -> int:  # noqa
@@ -254,8 +254,22 @@ def _compute_path_similarity(word_original: str, word_replacement: str, neg_type
                default=float("nan"))
 
 
+def _neg_type_name_to_index(neg_type: NegType) -> int:
+    return VALID_NEG_TYPES.index(neg_type)
+
+
 def _get_changed_word(triplet: Triplet, neg_type: NegType) -> str:
-    return triplet[VALID_NEG_TYPES.index(neg_type)]
+    return triplet[_neg_type_name_to_index(neg_type)]
+
+
+def _get_common_words(triplet: Triplet, neg_type: NegType) -> Collection[str]:
+    return {t for t, other_neg_type in zip(triplet, VALID_NEG_TYPES) if other_neg_type != neg_type}
+
+
+def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable[[str, pd.Series], Any]) -> None:
+    df[f"{prefix}-original"] = df.apply(lambda row: func(row.word_original, row), axis=1)
+    df[f"{prefix}-replacement"] = df.apply(lambda row: func(row.word_replacement, row), axis=1)
+    # df[f"{prefix}-common"] = df.apply(lambda row: func(row.words_common, row), axis=1)
 
 
 def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[str] = frozenset(),
@@ -269,6 +283,7 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
 
     df["word_original"] = df.apply(lambda row: _get_changed_word(row.pos_triplet, row.neg_type), axis=1)
     df["word_replacement"] = df.apply(lambda row: _get_changed_word(row.neg_triplet, row.neg_type), axis=1)
+    df["words_common"] = df.apply(lambda row: _get_common_words(row.pos_triplet, row.neg_type), axis=1)
 
     if "text_similarity" not in feature_deny_list:
         print("Computing the text similarity…")
@@ -290,41 +305,27 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
 
     if "Levin" not in feature_deny_list:
         dict_levin = _parse_levin_file()
-
-        df["Levin-original"] = df.apply(
-            lambda row: _get_levin_category(row.word_original, dict_levin) if row.neg_type == "v" else [], axis=1)
-        df["Levin-replacement"] = df.apply(
-            lambda row: _get_levin_category(row.word_replacement, dict_levin) if row.neg_type == "v" else [], axis=1)
+        _compute_feature_for_each_word(df, "Levin",
+                                       lambda w, row: _get_levin_category(w, dict_levin, row.neg_type))
 
     if "LIWC" not in feature_deny_list:
         dict_liwc = _parse_liwc_file()
-
-        df["LIWC-original"] = df.word_original.apply(lambda w: _get_liwc_category(w, dict_liwc))
-        df["LIWC-replacement"] = df.word_replacement.apply(lambda w: _get_liwc_category(w, dict_liwc))
+        _compute_feature_for_each_word(df, "LIWC", lambda w, _: _get_liwc_category(w, dict_liwc))
 
     if "hypernym" not in feature_deny_list:
         print("Computing the hypernyms…", end="")
-        df["hypernym-original"] = df.apply(lambda row: _get_hypernyms(row.word_original, row.neg_type), axis=1)
-        df["hypernym-replacement"] = df.apply(lambda row: _get_hypernyms(row.word_replacement, row.neg_type), axis=1)
+        _compute_feature_for_each_word(df, "hypernym", lambda w, row: _get_hypernyms(w, row.neg_type))
         print(" ✓")
 
     if "frequency" not in feature_deny_list:
         with open(PATH_WORD_FREQUENCIES) as json_file:
             word_frequencies = json.load(json_file)
-
-        df["frequency-original"] = df.word_original.apply(lambda w: word_frequencies.get(w, 0))
-        df["frequency-replacement"] = df.word_replacement.apply(lambda w: word_frequencies.get(w, 0))
-
+        _compute_feature_for_each_word(df, "frequency", lambda w, _: word_frequencies.get(w, 0))
         df["frequency-change"] = df["frequency-original"] - df["frequency-replacement"]
 
     if "concreteness" not in feature_deny_list:
         dict_concreteness = _parse_concreteness_file()
-
-        df["concreteness-original"] = df.word_original.apply(
-            lambda w: _get_concreteness_score(w, dict_concreteness))
-        df["concreteness-replacement"] = df.word_replacement.apply(
-            lambda w: _get_concreteness_score(w, dict_concreteness))
-
+        _compute_feature_for_each_word(df, "concreteness", lambda w, _: _get_concreteness_score(w, dict_concreteness))
         df["concreteness-change"] = df["concreteness-original"] - df["concreteness-replacement"]
 
     if "wup_similarity" not in feature_deny_list:
@@ -347,8 +348,7 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
 
     if "nb_synsets" not in feature_deny_list:
         print("Computing the number of synsets…", end="")
-        df["nb-synsets-original"] = df.apply(lambda row: _get_nb_synsets(row.word_original, row.neg_type), axis=1)
-        df["nb-synsets-replacement"] = df.apply(lambda row: _get_nb_synsets(row.word_replacement, row.neg_type), axis=1)
+        _compute_feature_for_each_word(df, "nb_synsets", lambda w, row: _get_nb_synsets(w, row.neg_type))
         print(" ✓")
 
     print("Feature computation done.")
