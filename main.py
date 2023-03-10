@@ -6,7 +6,7 @@ import itertools
 from collections import Counter
 from functools import partial
 from multiprocessing import Pool
-from typing import Any, Collection, Literal, Sequence, Tuple
+from typing import Any, Collection, Iterable, Literal, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -113,7 +113,7 @@ def _value_contains_label(v: Any, label: str) -> bool:
         raise ValueError(f"Unexpected value type: {type(v)}")
 
 
-def obtain_top_examples_and_co_occurrences(feature_names: str, raw_features: pd.DataFrame,
+def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_features: pd.DataFrame,
                                            max_word_count: int = 5) -> Tuple[Sequence[str], Sequence[str]]:
     multi_label_features = {main_feature_name
                             for feature_name in feature_names
@@ -216,7 +216,7 @@ def compute_ridge_regression(features: pd.DataFrame, dependent_variable: np.ndar
     print(df.to_string())
 
 
-def compute_dominance_score(features: pd.DataFrame, dependent_variable: np.ndarray) -> None:
+def compute_dominance_score(features: pd.DataFrame, dependent_variable: np.ndarray, raw_features: pd.DataFrame) -> None:
     assert len(features) == len(dependent_variable)
     assert is_feature_binary(dependent_variable)
 
@@ -234,9 +234,12 @@ def compute_dominance_score(features: pd.DataFrame, dependent_variable: np.ndarr
             neg_coverage = feature[neg_labels].sum() / total_neg
             dominance_scores[column] = pos_coverage / neg_coverage
 
-    print("Dominance scores:")
-    for column, score in sorted(dominance_scores.items(), key=lambda x: x[1], reverse=True):
-        print(score, column)
+    examples, co_occurring_examples = obtain_top_examples_and_co_occurrences(dominance_scores.keys(), raw_features)
+    df = pd.DataFrame.from_dict({"": dominance_scores.keys(), "dominance score": dominance_scores.values(),
+                                 "examples": examples,
+                                 "co-occurring word examples": co_occurring_examples}).set_index("")
+    df = df.sort_values(by=["dominance score"], ascending=False)
+    print(df.to_string())
 
 
 def parse_args() -> argparse.Namespace:
@@ -268,7 +271,7 @@ def main() -> None:
 
     print("Disabled features:", args.feature_deny_list)
 
-    raw_features, features, labels = load_features(
+    raw_features, features, dependent_variable = load_features(
         path=args.input_path, dependent_variable_name=args.dependent_variable_name,
         max_feature_count=1000 if args.debug else None, feature_deny_list=args.feature_deny_list,
         standardize_dependent_variable=args.model in REGRESSION_MODELS,
@@ -278,13 +281,13 @@ def main() -> None:
         feature_min_non_zero_values=args.feature_min_non_zero_values)
 
     if args.model == "dominance-score":
-        compute_dominance_score(features, labels)
+        compute_dominance_score(features, dependent_variable, raw_features)
     elif args.model == "ols":
-        compute_ols_regression(features, labels, raw_features)
+        compute_ols_regression(features, dependent_variable, raw_features)
     elif args.model == "ridge":
-        compute_ridge_regression(features, labels, raw_features)
+        compute_ridge_regression(features, dependent_variable, raw_features)
     elif args.model == "svm":
-        compute_svm_regression(features, labels, iterations=args.iterations)
+        compute_svm_regression(features, dependent_variable, iterations=args.iterations)
     else:
         raise ValueError(f"Unknown model: {args.model} (should be in {MODELS}).")
 
