@@ -104,21 +104,28 @@ def compute_svm_regression(features: pd.DataFrame, labels: np.ndarray, iteration
 
 
 def obtain_top_examples(feature_names: str, raw_features: pd.DataFrame, max_example_count: int = 5) -> Sequence[str]:
-    multi_label_features = {prefix
+    multi_label_features = {main_feature_name
                             for feature_name in feature_names
-                            if ((prefix := feature_name.split("_", maxsplit=1)[0]) in raw_features
-                                and is_feature_multi_label(raw_features[prefix]))}
+                            if ((main_feature_name := feature_name.split("_", maxsplit=1)[0]) in raw_features
+                                and is_feature_multi_label(raw_features[main_feature_name]))}
 
     examples = []
 
     for feature_name in feature_names:
-        prefix = feature_name.split("_", maxsplit=1)[0]
-        if prefix in multi_label_features:
-            suffix = feature_name.split("_", maxsplit=1)[1]
-            string_after_dash = prefix.split("-", maxsplit=1)[1]  # Should be "original" or "replacement".
-            words = raw_features[raw_features[prefix].apply(
-                lambda labels: suffix in labels)][f"word_{string_after_dash}"]
-            counter = Counter(words.tolist())
+        main_feature_name = feature_name.split("_", maxsplit=1)[0]
+        if main_feature_name in multi_label_features:
+            label = feature_name.split("_", maxsplit=1)[1]
+
+            string_after_dash = main_feature_name.split("-", maxsplit=1)[1]
+            assert string_after_dash in {"original", "replacement", "common"}
+
+            mask = raw_features[main_feature_name].map(lambda labels: label in labels)
+            rows_with_suffix = raw_features[mask]
+            if string_after_dash == "common":
+                words = rows_with_suffix["words_common"].explode()
+            else:
+                words = rows_with_suffix[f"word_{string_after_dash}"]
+            counter = Counter(words)
 
             examples.append(", ".join(f"{word} ({freq})" for word, freq in counter.most_common(max_example_count)))
         else:
