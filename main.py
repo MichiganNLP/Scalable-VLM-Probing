@@ -116,15 +116,16 @@ def obtain_top_examples(feature_names: str, raw_features: pd.DataFrame, max_exam
         if main_feature_name in multi_label_features:
             label = feature_name.split("_", maxsplit=1)[1]
 
-            string_after_dash = main_feature_name.split("-", maxsplit=1)[1]
-            assert string_after_dash in {"original", "replacement", "common"}
+            word_type = main_feature_name.split("-", maxsplit=1)[1]
+            assert word_type in {"original", "replacement", "common"}
 
             mask = raw_features[main_feature_name].map(lambda labels: label in labels)
-            rows_with_suffix = raw_features[mask]
-            if string_after_dash == "common":
-                words = rows_with_suffix["words_common"].explode()
+            rows_with_label = raw_features[mask]
+            if word_type == "common":
+                # We could also do `rows_with_label["words_common"].explode()`, but this is likely faster:
+                words = (word for word_set in rows_with_label["words_common"] for word in word_set)
             else:
-                words = rows_with_suffix[f"word_{string_after_dash}"]
+                words = rows_with_label[f"word_{word_type}"]
             counter = Counter(words)
 
             examples.append(", ".join(f"{word} ({freq})" for word, freq in counter.most_common(max_example_count)))
