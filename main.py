@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 from collections import Counter
 from functools import partial
 from multiprocessing import Pool
@@ -103,13 +104,15 @@ def compute_svm_regression(features: pd.DataFrame, labels: np.ndarray, iteration
     _plot_coef_weights_svm(coef_weights, features)
 
 
-def obtain_top_examples(feature_names: str, raw_features: pd.DataFrame, max_example_count: int = 5) -> Sequence[str]:
+def obtain_top_examples_and_co_occurrences(feature_names: str, raw_features: pd.DataFrame,
+                                           max_word_count: int = 5) -> Tuple[Sequence[str], Sequence[str]]:
     multi_label_features = {main_feature_name
                             for feature_name in feature_names
                             if ((main_feature_name := feature_name.split("_", maxsplit=1)[0]) in raw_features
                                 and is_feature_multi_label(raw_features[main_feature_name]))}
 
     examples = []
+    co_occurrence_examples = []
 
     for feature_name in feature_names:
         underscore_split = feature_name.split("_", maxsplit=1)
@@ -127,18 +130,36 @@ def obtain_top_examples(feature_names: str, raw_features: pd.DataFrame, max_exam
                                      if label in row.get(f"{main_feature_name_prefix}-common-{i}", [])], axis=1)
                     # We could also use `lists_of_words_with_label.explode()`, but this is likely faster:
                     words = (w for word_iter in lists_of_words_with_label for w in word_iter)
+
+                    list_of_words_without_label = rows_with_label.apply(
+                        lambda row: [row["words-common"][i]
+                                     for i in range(3)
+                                     if label not in row.get(f"{main_feature_name_prefix}-common-{i}", [label])],
+                        axis=1)
+                    # We could also use `list_of_words_without_label.explode()`, but this is likely faster:
+                    co_occurrence_words = (w for word_iter in list_of_words_without_label for w in word_iter)
                 else:
                     words = rows_with_label[f"word-{word_type}"]
+                    other_word_type = next(iter({"original", "replacement"} - {word_type}))
+                    co_occurrence_words = itertools.chain((w for w in rows_with_label[f"word-{other_word_type}"]),
+                                                          (w
+                                                           for word_iter in rows_with_label[f"words-common"]
+                                                           for w in word_iter))
 
-                examples_str = ", ".join(f"{w} ({freq})" for w, freq in Counter(words).most_common(max_example_count))
+                examples_str = ", ".join(f"{w} ({freq})" for w, freq in Counter(words).most_common(max_word_count))
+                co_occurrence_example_str = ", ".join(
+                    f"{w} ({freq})" for w, freq in Counter(co_occurrence_words).most_common(max_word_count))
             else:
                 examples_str = ""
+                co_occurrence_example_str = ""
         else:
             examples_str = ""
+            co_occurrence_example_str = ""
 
         examples.append(examples_str)
+        co_occurrence_examples.append(co_occurrence_example_str)
 
-    return examples
+    return examples, co_occurrence_examples
 
 
 def compute_ols_regression(features: pd.DataFrame, dependent_variable: np.ndarray, raw_features: pd.DataFrame,
@@ -167,7 +188,7 @@ def compute_ols_regression(features: pd.DataFrame, dependent_variable: np.ndarra
 
     df = df.sort_values(by=["coef"], ascending=False)
 
-    df["examples"] = obtain_top_examples(df.index, raw_features)
+    df["examples"], df["co-occurring word examples"] = obtain_top_examples_and_co_occurrences(df.index, raw_features)
 
     print(df.to_string())
 
@@ -177,8 +198,9 @@ def compute_ridge_regression(features: pd.DataFrame, dependent_variable: np.ndar
     model = Ridge(alpha=alpha)
     model.fit(features, dependent_variable)
     print("R^2:", model.score(features, dependent_variable))
-    df = pd.DataFrame.from_dict({"": features.columns, "coef": model.coef_,
-                                 "examples": obtain_top_examples(features.columns, raw_features)})
+    examples, co_occurring_examples = obtain_top_examples_and_co_occurrences(features.columns, raw_features)
+    df = pd.DataFrame.from_dict({"": features.columns, "coef": model.coef_, "examples": examples,
+                                 "co-occurring word examples": co_occurring_examples})
     df = df.set_index("")
     df = df.sort_values(by=["coef"], ascending=False)
     print(df.to_string())
