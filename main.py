@@ -23,6 +23,8 @@ CLASSIFICATION_MODELS = {"dominance-score", "svm"}
 REGRESSION_MODELS = {"ols", "ridge"}
 MODELS = CLASSIFICATION_MODELS | REGRESSION_MODELS
 
+EXAMPLE_MODES = ["top", "sample", "disabled"]
+
 
 def _plot_coef_weights_svm(coef_weights: np.ndarray, features: pd.DataFrame,
                            path: str = "data/coef_importance.png", top_features: int = 5) -> None:
@@ -116,7 +118,7 @@ def _value_contains_label(v: Any, label: str) -> bool:
 
 def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_features: pd.DataFrame,
                                            max_word_count: int = 5,
-                                           sample: bool = False) -> Tuple[Sequence[str], Sequence[str]]:
+                                           sample_size: int | None = None) -> Tuple[Sequence[str], Sequence[str]]:
     multi_label_features = {main_feature_name
                             for feature_name in feature_names
                             if ((main_feature_name := feature_name.split("_", maxsplit=1)[0]) in raw_features
@@ -135,8 +137,8 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
                 mask = raw_features[main_feature_name].map(lambda labels: label in labels)
                 rows_with_label = raw_features[mask]
 
-                if sample:
-                    rows_with_label = rows_with_label.sample(n=max_word_count)
+                if sample_size:
+                    rows_with_label = rows_with_label.sample(min(sample_size, len(rows_with_label)))
 
                 if word_type == "common":
                     lists_of_words_with_label = rows_with_label.apply(
@@ -245,7 +247,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--merge-original-and-replacement-features", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--iterations", type=int, default=10_000, help="Only applies to the SVM model.")
-    parser.add_argument("--examples", choices=["top", "sample", "disabled"], default="top")
+    parser.add_argument("--examples", choices=EXAMPLE_MODES, default="top")
     args = parser.parse_args()
 
     args.dependent_variable_name = (args.dependent_variable_name
@@ -287,9 +289,16 @@ def main() -> None:
     df = df.sort_values(by=["coef"], ascending=False)
 
     if args.examples != "disabled":
+        if args.examples == "top":
+            sample_size = None
+        elif args.examples == "sample":
+            sample_size = 100
+        else:
+            raise ValueError(f"Unknown examples mode: {args.examples} (should be in {EXAMPLE_MODES}).")
+
         (df["examples"],
          df["co-occurring word examples"]) = obtain_top_examples_and_co_occurrences(df.index, raw_features,
-                                                                                    sample=args.examples == "sample")
+                                                                                    sample_size=sample_size)
 
     print(df.to_string())
 
