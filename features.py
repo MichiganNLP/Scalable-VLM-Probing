@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import functools
 import itertools
 import json
 import string
@@ -96,7 +95,6 @@ def _load_clip_results(path: str) -> pd.DataFrame:
     return df
 
 
-@functools.lru_cache
 def _parse_levin_file(path: str = PATH_LEVIN_VERBS, path_semantic_broad: str = PATH_LEVIN_SEMANTIC_BROAD,
                       return_mode: Literal["alternation", "semantic_broad", "semantic_fine_grained", "all"] = "all",
                       verbose: bool = True) -> Mapping[str, Collection[str]]:
@@ -186,7 +184,6 @@ def _get_hypernyms(word: str, neg_type: NegType) -> Sequence[str]:
         return [word]
 
 
-@functools.lru_cache
 def _parse_liwc_file(path: str = PATH_LIWC, verbose: bool = True) -> Mapping[str, Sequence[str]]:
     dict_liwc = defaultdict(list)
     liwc_categories = set()
@@ -211,7 +208,6 @@ def _get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Col
             for category in categories}
 
 
-@functools.lru_cache
 def _parse_concreteness_file(path: str = PATH_CONCRETENESS) -> Mapping[str, float]:
     dict_concreteness = {}
     with open(path) as file:
@@ -263,7 +259,7 @@ def _get_changed_word(triplet: Triplet, neg_type: NegType) -> str:
 
 
 def _get_common_words(triplet: Triplet, neg_type: NegType) -> Collection[str]:
-    return {t for t, other_neg_type in zip(triplet, VALID_NEG_TYPES) if other_neg_type != neg_type}
+    return [t for t, other_neg_type in zip(triplet, VALID_NEG_TYPES) if other_neg_type != neg_type]
 
 
 def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable[[str, pd.Series], Any],
@@ -274,17 +270,22 @@ def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable
 
     placeholder_result = pd.Series([func("dog", df.iloc[0])])
 
-    if np.issubdtype(placeholder_result, np.number):
-        df[f"{prefix}-common"] = df.apply(
-            lambda row: sum(func(w, row) for w in row["words-common"]) / len(row["words-common"]), axis=1)
+    common_results = df.apply(lambda row: [func(w, row) for w in row["words-common"]], axis=1)
+
+    if np.issubdtype(placeholder_result.dtype, np.number):
+        df[f"{prefix}-common"] = common_results.map(lambda r: sum(r) / len(r))
         if compute_neg_features:
             df[f"{prefix}-change"] = df[f"{prefix}-original"] - df[f"{prefix}-replacement"]
     elif is_feature_string(placeholder_result):
-        df[f"{prefix}-common"] = df.apply(lambda row: {func(w, row) for w in row["words-common"]}, axis=1)
+        df[f"{prefix}-common"] = common_results.map(set)
     elif is_feature_multi_label(placeholder_result):
-        df[f"{prefix}-common"] = df.apply(lambda row: {label
-                                                       for w in row["words-common"]
-                                                       for label in func(w, row)}, axis=1)
+        df[f"{prefix}-common"] = common_results.map(lambda r: {label for labels in r for label in labels})
+    else:
+        raise ValueError(f"Unknown feature type {type(placeholder_result)}")
+
+    common_results_df = pd.DataFrame(common_results.values.tolist(), index=common_results.index)
+    for i, column_name in enumerate(common_results_df.columns):
+        df[f"{prefix}-common-{i}"] = common_results_df[column_name]
 
 
 def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[str] = frozenset(),
@@ -302,6 +303,9 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         df["words-common"] = df.apply(lambda row: _get_common_words(row.pos_triplet, row.neg_type), axis=1)
     else:
         df["words-common"] = df.pos_triplet
+
+    for i in range(len(df["words-common"].iloc[0])):
+        df[f"words-common-{i}"] = df.pos_triplet.str[i]
 
     if "Levin" not in feature_deny_list:
         dict_levin = _parse_levin_file()
@@ -441,16 +445,12 @@ def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
     if is_feature_binary(feature):
         transformers = [SelectMinNonZero(feature_min_non_zero_values)]
     elif np.issubdtype(dtype, np.number):
-        if impute_missing_values:
-            transformers = [SimpleImputer(), StandardScaler()]
-        else:
-            transformers = [StandardScaler()]
-    elif dtype == object:
-        if is_feature_string(feature):
-            transformers = [OneHotEncoder(dtype=bool, sparse_output=not standardize_binary_features),
-                            SelectMinNonZero(feature_min_non_zero_values)]
-        elif is_feature_multi_label(feature):
-            transformers = [MultiLabelBinarizer(), SelectMinNonZero(feature_min_non_zero_values)]
+        transformers = ([SimpleImputer()] if impute_missing_values else []) + [StandardScaler()]  # noqa
+    elif is_feature_string(feature):
+        transformers = [OneHotEncoder(dtype=bool, sparse_output=not standardize_binary_features),
+                        SelectMinNonZero(feature_min_non_zero_values)]
+    elif is_feature_multi_label(feature):
+        transformers = [MultiLabelBinarizer(), SelectMinNonZero(feature_min_non_zero_values)]
 
     if standardize_binary_features and (is_feature_binary(feature) or is_feature_multi_label(feature)
                                         or is_feature_string(feature)):
@@ -466,8 +466,9 @@ def _transform_features_to_numbers(
     if not standardize_dependent_variable:
         dependent_variable = df.pop(dependent_variable_name)
 
-    columns_to_drop = list({"sentence", "neg_sentence", "pos_triplet", "neg_triplet", "clip prediction",
+    columns_to_drop = (list({"sentence", "neg_sentence", "pos_triplet", "neg_triplet", "clip prediction",
                             "clip_score_diff", "pos_clip_score", "neg_clip_score"} - {dependent_variable_name})
+                       + [c for c in df.columns if "-common-" in c])
     df = df.drop(columns=list(columns_to_drop))
 
     if verbose:
