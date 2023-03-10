@@ -305,7 +305,7 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         df["words-common"] = df.pos_triplet
 
     for i in range(len(df["words-common"].iloc[0])):
-        df[f"words-common-{i}"] = df.pos_triplet.str[i]
+        df[f"words-common-{i}"] = df["words-common"].str[i]
 
     if "Levin" not in feature_deny_list:
         dict_levin = _parse_levin_file()
