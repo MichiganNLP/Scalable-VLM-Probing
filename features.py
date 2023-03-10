@@ -266,24 +266,29 @@ def _get_common_words(triplet: Triplet, neg_type: NegType) -> Collection[str]:
     return {t for t, other_neg_type in zip(triplet, VALID_NEG_TYPES) if other_neg_type != neg_type}
 
 
-def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable[[str, pd.Series], Any]) -> None:
-    df[f"{prefix}-original"] = df.apply(lambda row: func(row.word_original, row), axis=1)
-    df[f"{prefix}-replacement"] = df.apply(lambda row: func(row.word_replacement, row), axis=1)
+def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable[[str, pd.Series], Any],
+                                   compute_neg_features: bool = True) -> None:
+    if compute_neg_features:
+        df[f"{prefix}-original"] = df.apply(lambda row: func(row.word_original, row), axis=1)
+        df[f"{prefix}-replacement"] = df.apply(lambda row: func(row.word_replacement, row), axis=1)
 
-    if np.issubdtype(df[f"{prefix}-original"], np.number):
+    placeholder_result = pd.Series([func("dog", df.iloc[0])])
+
+    if np.issubdtype(placeholder_result, np.number):
         df[f"{prefix}-common"] = df.apply(
             lambda row: sum(func(w, row) for w in row.words_common) / len(row.words_common), axis=1)
-        df[f"{prefix}-change"] = df[f"{prefix}-original"] - df[f"{prefix}-replacement"]
-    elif is_feature_string(df[f"{prefix}-original"]):
+        if compute_neg_features:
+            df[f"{prefix}-change"] = df[f"{prefix}-original"] - df[f"{prefix}-replacement"]
+    elif is_feature_string(placeholder_result):
         df[f"{prefix}-common"] = df.apply(lambda row: {func(w, row) for w in row.words_common}, axis=1)
-    elif is_feature_multi_label(df[f"{prefix}-original"]):
+    elif is_feature_multi_label(placeholder_result):
         df[f"{prefix}-common"] = df.apply(lambda row: {label
                                                        for w in row.words_common
                                                        for label in func(w, row)}, axis=1)
 
 
 def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[str] = frozenset(),
-                      max_feature_count: int | None = None) -> pd.DataFrame:
+                      max_feature_count: int | None = None, compute_neg_features: bool = True) -> pd.DataFrame:
     print("Computing all the features…")
 
     if max_feature_count:
@@ -291,11 +296,50 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
 
     df = clip_results.copy()
 
-    df["word_original"] = df.apply(lambda row: _get_changed_word(row.pos_triplet, row.neg_type), axis=1)
-    df["word_replacement"] = df.apply(lambda row: _get_changed_word(row.neg_triplet, row.neg_type), axis=1)
-    df["words_common"] = df.apply(lambda row: _get_common_words(row.pos_triplet, row.neg_type), axis=1)
+    if compute_neg_features:
+        df["word_original"] = df.apply(lambda row: _get_changed_word(row.pos_triplet, row.neg_type), axis=1)
+        df["word_replacement"] = df.apply(lambda row: _get_changed_word(row.neg_triplet, row.neg_type), axis=1)
+        df["words_common"] = df.apply(lambda row: _get_common_words(row.pos_triplet, row.neg_type), axis=1)
+    else:
+        df["words_common"] = df.pos_triplet
 
-    if "text_similarity" not in feature_deny_list:
+    if "Levin" not in feature_deny_list:
+        dict_levin = _parse_levin_file()
+        _compute_feature_for_each_word(df, "Levin",
+                                       lambda w, row: _get_levin_category(w, dict_levin, row.neg_type),
+                                       compute_neg_features=compute_neg_features)
+
+    if "LIWC" not in feature_deny_list:
+        dict_liwc = _parse_liwc_file()
+        _compute_feature_for_each_word(df, "LIWC", lambda w, _: _get_liwc_category(w, dict_liwc),
+                                       compute_neg_features=compute_neg_features)
+
+    if "hypernym" not in feature_deny_list:
+        print("Computing the hypernyms…", end="")
+        _compute_feature_for_each_word(df, "hypernym", lambda w, row: _get_hypernyms(w, row.neg_type),
+                                       compute_neg_features=compute_neg_features)
+        print(" ✓")
+
+    if "frequency" not in feature_deny_list:
+        with open(PATH_WORD_FREQUENCIES) as json_file:
+            word_frequencies = json.load(json_file)
+        _compute_feature_for_each_word(df, "frequency", lambda w, _: word_frequencies.get(w, 0),
+                                       compute_neg_features=compute_neg_features)
+
+    if "concreteness" not in feature_deny_list:
+        dict_concreteness = _parse_concreteness_file()
+        _compute_feature_for_each_word(df, "concreteness", lambda w, _: _get_concreteness_score(w, dict_concreteness),
+                                       compute_neg_features=compute_neg_features)
+
+    if "nb_synsets" not in feature_deny_list:
+        print("Computing the number of synsets…", end="")
+        _compute_feature_for_each_word(df, "nb_synsets", lambda w, row: _get_nb_synsets(w, row.neg_type),
+                                       compute_neg_features=compute_neg_features)
+        print(" ✓")
+
+    # Similarity features:
+
+    if "text_similarity" not in feature_deny_list and compute_neg_features:
         print("Computing the text similarity…")
 
         embedded_sentences = text_model.encode(df.sentence.array, show_progress_bar=True)
@@ -305,7 +349,7 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         # We set the similarity to NaN for empty sentences:
         df.loc[[s == "" for s in df.neg_sentence], "text_similarity"] = float("nan")
 
-    if "word_similarity" not in feature_deny_list:
+    if "word_similarity" not in feature_deny_list and compute_neg_features:
         print("Computing the word similarity…")
 
         embedded_original_words = text_model.encode(df.word_original.array, show_progress_bar=True)
@@ -313,50 +357,22 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
 
         df["word_similarity"] = util.pairwise_cos_sim(embedded_original_words, embedded_replacement_words)
 
-    if "Levin" not in feature_deny_list:
-        dict_levin = _parse_levin_file()
-        _compute_feature_for_each_word(df, "Levin",
-                                       lambda w, row: _get_levin_category(w, dict_levin, row.neg_type))
-
-    if "LIWC" not in feature_deny_list:
-        dict_liwc = _parse_liwc_file()
-        _compute_feature_for_each_word(df, "LIWC", lambda w, _: _get_liwc_category(w, dict_liwc))
-
-    if "hypernym" not in feature_deny_list:
-        print("Computing the hypernyms…", end="")
-        _compute_feature_for_each_word(df, "hypernym", lambda w, row: _get_hypernyms(w, row.neg_type))
-        print(" ✓")
-
-    if "frequency" not in feature_deny_list:
-        with open(PATH_WORD_FREQUENCIES) as json_file:
-            word_frequencies = json.load(json_file)
-        _compute_feature_for_each_word(df, "frequency", lambda w, _: word_frequencies.get(w, 0))
-
-    if "concreteness" not in feature_deny_list:
-        dict_concreteness = _parse_concreteness_file()
-        _compute_feature_for_each_word(df, "concreteness", lambda w, _: _get_concreteness_score(w, dict_concreteness))
-
-    if "wup_similarity" not in feature_deny_list:
+    if "wup_similarity" not in feature_deny_list and compute_neg_features:
         print("Computing the Wu-Palmer similarity…", end="")
         df["wup_similarity"] = df.apply(
             lambda row: _compute_wup_similarity(row.word_original, row.word_replacement, row.neg_type), axis=1)
         print(" ✓")
 
-    if "lch_similarity" not in feature_deny_list:
+    if "lch_similarity" not in feature_deny_list and compute_neg_features:
         print("Computing the Leacock-Chodorow similarity…", end="")
         df["lch_similarity"] = df.apply(
             lambda row: _compute_lch_similarity(row.word_original, row.word_replacement, row.neg_type), axis=1)
         print(" ✓")
 
-    if "path_similarity" not in feature_deny_list:
+    if "path_similarity" not in feature_deny_list and compute_neg_features:
         print("Computing the Path similarity…", end="")
         df["path_similarity"] = df.apply(
             lambda row: _compute_path_similarity(row.word_original, row.word_replacement, row.neg_type), axis=1)
-        print(" ✓")
-
-    if "nb_synsets" not in feature_deny_list:
-        print("Computing the number of synsets…", end="")
-        _compute_feature_for_each_word(df, "nb_synsets", lambda w, row: _get_nb_synsets(w, row.neg_type))
         print(" ✓")
 
     print("Feature computation done.")
@@ -526,12 +542,12 @@ def _describe_features(features: pd.DataFrame, dependent_variable: np.ndarray) -
 
 def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_name: str,
                               max_feature_count: int | None = None, feature_deny_list: Collection[str] = frozenset(),
-                              merge_original_and_replacement_features: bool = True,
+                              compute_neg_features: bool = True, merge_original_and_replacement_features: bool = True,
                               feature_min_non_zero_values: int = 50, standardize_dependent_variable: bool = True,
                               standardize_binary_features: bool = True,
                               verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
     raw_features = _compute_features(clip_results, feature_deny_list=feature_deny_list,
-                                     max_feature_count=max_feature_count)
+                                     max_feature_count=max_feature_count, compute_neg_features=compute_neg_features)
     features, dependent_variable = _transform_features_to_numbers(
         raw_features, dependent_variable_name, standardize_dependent_variable=standardize_dependent_variable,
         standardize_binary_features=standardize_binary_features,
@@ -546,24 +562,25 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
 
 def load_features(path: str, dependent_variable_name: str, max_feature_count: int | None = None,
                   feature_deny_list: Collection[str] = frozenset(), standardize_dependent_variable: bool = True,
-                  standardize_binary_features: bool = True, merge_original_and_replacement_features: bool = True,
+                  standardize_binary_features: bool = True, compute_neg_features: bool = True,
+                  merge_original_and_replacement_features: bool = True,
                   feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
     clip_results = _load_clip_results(path)
     return _compute_numeric_features(
         clip_results, dependent_variable_name, max_feature_count=max_feature_count, feature_deny_list=feature_deny_list,
         standardize_dependent_variable=standardize_dependent_variable,
-        standardize_binary_features=standardize_binary_features,
+        standardize_binary_features=standardize_binary_features, compute_neg_features=compute_neg_features,
         merge_original_and_replacement_features=merge_original_and_replacement_features,
         feature_min_non_zero_values=feature_min_non_zero_values)
 
 
-def is_feature_binary(feature: np.ndarray) -> bool:
+def is_feature_binary(feature: np.ndarray | pd.Series) -> bool:
     return feature.dtype == bool or (np.issubdtype(feature.dtype, np.integer) and set(np.unique(feature)) == {0, 1})
 
 
-def is_feature_multi_label(feature: np.ndarray) -> bool:
+def is_feature_multi_label(feature: np.ndarray | pd.Series) -> bool:
     return all(issubclass(type(x), Iterable) and not issubclass(type(x), str) for x in feature)
 
 
-def is_feature_string(feature: np.ndarray) -> bool:
+def is_feature_string(feature: np.ndarray | pd.Series) -> bool:
     return all(issubclass(type(x), str) for x in feature)
