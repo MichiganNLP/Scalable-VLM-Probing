@@ -6,7 +6,7 @@ import itertools
 from collections import Counter
 from functools import partial
 from multiprocessing import Pool
-from typing import Literal, Sequence, Tuple
+from typing import Collection, Literal, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -104,6 +104,18 @@ def compute_svm_regression(features: pd.DataFrame, labels: np.ndarray, iteration
     _plot_coef_weights_svm(coef_weights, features)
 
 
+def _feature_contains_label(feature_name: str, row: pd.Series, label: str) -> bool:
+    if v := row.get(feature_name):
+        if isinstance(v, str):
+            return v == label
+        elif isinstance(v, Collection):
+            return label in v
+        else:
+            raise ValueError(f"Unexpected value type: {type(v)}")
+    else:
+        return False
+
+
 def obtain_top_examples_and_co_occurrences(feature_names: str, raw_features: pd.DataFrame,
                                            max_word_count: int = 5) -> Tuple[Sequence[str], Sequence[str]]:
     multi_label_features = {main_feature_name
@@ -127,15 +139,16 @@ def obtain_top_examples_and_co_occurrences(feature_names: str, raw_features: pd.
                     lists_of_words_with_label = rows_with_label.apply(
                         lambda row: [row["words-common"][i]
                                      for i in range(3)
-                                     if label in row.get(f"{main_feature_name_prefix}-common-{i}", [])], axis=1)
+                                     if _feature_contains_label(f"{main_feature_name_prefix}-common-{i}", row, label)],
+                        axis=1)
                     # We could also use `lists_of_words_with_label.explode()`, but this is likely faster:
                     words = (w for word_iter in lists_of_words_with_label for w in word_iter)
 
                     list_of_words_without_label = rows_with_label.apply(
                         lambda row: [row["words-common"][i]
                                      for i in range(3)
-                                     if label not in row.get(f"{main_feature_name_prefix}-common-{i}", [label])],
-                        axis=1)
+                                     if not _feature_contains_label(f"{main_feature_name_prefix}-common-{i}", row,
+                                                                    label)], axis=1)
                     # We could also use `list_of_words_without_label.explode()`, but this is likely faster:
                     co_occurrence_words = (w for word_iter in list_of_words_without_label for w in word_iter)
                 else:
