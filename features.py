@@ -455,7 +455,10 @@ def _transform_features_to_numbers(
     df = df.drop(columns=list(columns_to_drop))
 
     if verbose:
-        print("Number of features before transforming them into numerical:", len(df.columns))
+        feature_count = len(df.columns)
+        if standardize_dependent_variable:
+            feature_count -= 1
+        print("Number of features before transforming them into numerical:", feature_count)
 
     transformers: MutableSequence[Tuple] = []
 
