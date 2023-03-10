@@ -424,7 +424,7 @@ def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
             transformers = [StandardScaler()]
     elif dtype == object:
         if is_feature_string(feature):
-            transformers = [OneHotEncoder(dtype=bool, sparse=not standardize_binary_features),
+            transformers = [OneHotEncoder(dtype=bool, sparse_output=not standardize_binary_features),
                             SelectMinNonZero(feature_min_non_zero_values)]
         elif is_feature_multi_label(feature):
             transformers = [MultiLabelBinarizer(), SelectMinNonZero(feature_min_non_zero_values)]
@@ -443,9 +443,8 @@ def _transform_features_to_numbers(
     if not standardize_dependent_variable:
         dependent_variable = df.pop(dependent_variable_name)
 
-    columns_to_drop = list({"sentence", "neg_sentence", "pos_triplet", "neg_triplet", "word_original",
-                            "word_replacement", "words_common", "clip prediction", "clip_score_diff", "pos_clip_score",
-                            "neg_clip_score"} - {dependent_variable_name})
+    columns_to_drop = list({"sentence", "neg_sentence", "pos_triplet", "neg_triplet", "clip prediction",
+                            "clip_score_diff", "pos_clip_score", "neg_clip_score"} - {dependent_variable_name})
     df = df.drop(columns=list(columns_to_drop))
 
     transformers: MutableSequence[Tuple] = []
@@ -503,6 +502,7 @@ def _transform_features_to_numbers(
 
 
 def _describe_features(features: pd.DataFrame, dependent_variable: np.ndarray) -> None:
+    # FIXME: the main feature names doesn't work well. It should only split the binarized ones.
     main_feature_names = [feature_name.split("_")[0] for feature_name in features.columns]
     print(f"Features size:", len(features.columns), "--", Counter(main_feature_names))
     print(f"Features shape:", features.shape)

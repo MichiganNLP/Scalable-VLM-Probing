@@ -137,8 +137,7 @@ def compute_ols_regression(features: pd.DataFrame, dependent_variable: np.ndarra
     if regularization:
         results = model.fit_regularized(L1_wt=0 if regularization == "ridge" else 1, alpha=alpha)
         print("R^2:", RegressionResults(model, results.params).rsquared)
-        df = pd.DataFrame.from_dict({"": features.columns, "coef": results.params})
-        df = df.set_index("")
+        df = pd.DataFrame.from_dict({"": features.columns, "coef": results.params}).set_index("")
     else:
         results = model.fit()
         summary = results.summary()
@@ -150,7 +149,7 @@ def compute_ols_regression(features: pd.DataFrame, dependent_variable: np.ndarra
 
         print()
         print()
-        print("Significant features:")
+        print(f"Features whose coefficient is significantly different from zero ({len(df)}):")
 
     df = df.sort_values(by=["coef"], ascending=False)
 
