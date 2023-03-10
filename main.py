@@ -271,7 +271,7 @@ def main() -> None:
     raw_features, features, labels = load_features(
         path=args.input_path, dependent_variable_name=args.dependent_variable_name,
         max_feature_count=1000 if args.debug else None, feature_deny_list=args.feature_deny_list,
-        standardize_dependent_variable=True, standardize_binary_features=True,
+        standardize_dependent_variable=args.model in REGRESSION_MODELS, standardize_binary_features=True,
         compute_neg_features=args.compute_neg_features,
         merge_original_and_replacement_features=args.merge_original_and_replacement_features,
         feature_min_non_zero_values=args.feature_min_non_zero_values)
