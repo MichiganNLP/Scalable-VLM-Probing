@@ -269,10 +269,17 @@ def _get_common_words(triplet: Triplet, neg_type: NegType) -> Collection[str]:
 def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable[[str, pd.Series], Any]) -> None:
     df[f"{prefix}-original"] = df.apply(lambda row: func(row.word_original, row), axis=1)
     df[f"{prefix}-replacement"] = df.apply(lambda row: func(row.word_replacement, row), axis=1)
-    # df[f"{prefix}-common"] = df.apply(lambda row: func(row.words_common, row), axis=1)
 
     if np.issubdtype(df[f"{prefix}-original"], np.number):
+        df[f"{prefix}-common"] = df.apply(
+            lambda row: sum(func(w, row) for w in row.words_common) / len(row.words_common), axis=1)
         df[f"{prefix}-change"] = df[f"{prefix}-original"] - df[f"{prefix}-replacement"]
+    elif is_feature_string(df[f"{prefix}-original"]):
+        df[f"{prefix}-common"] = df.apply(lambda row: {func(w, row) for w in row.words_common}, axis=1)
+    elif is_feature_multi_label(df[f"{prefix}-original"]):
+        df[f"{prefix}-common"] = df.apply(lambda row: {label
+                                                       for w in row.words_common
+                                                       for label in func(w, row)}, axis=1)
 
 
 def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[str] = frozenset(),
