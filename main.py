@@ -123,7 +123,7 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
                                            max_word_count: int = 5,
                                            sample_size: int | None = None) -> Tuple[Sequence[str], Sequence[str]]:
     multi_label_features = {main_feature_name
-                            for feature_name in feature_names
+                            for feature_name in tqdm(feature_names, desc="Obtaining the multi-label features")
                             if ((main_feature_name := feature_name.split("_", maxsplit=1)[0]) in raw_features
                                 and is_feature_multi_label(raw_features[main_feature_name]))}
 
@@ -152,13 +152,13 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
                     # We could also use `lists_of_words_with_label.explode()`, but this is likely faster:
                     words = (w for word_iter in lists_of_words_with_label for w in word_iter)
 
-                    list_of_words_without_label = rows_with_label.apply(
+                    lists_of_words_without_label = rows_with_label.apply(
                         lambda row: [w
                                      for i, w in enumerate(row["words-common"])
                                      if not _value_contains_label(row[f"{main_feature_name_prefix}-common-{i}"],
                                                                   label)], axis=1)
-                    # We could also use `list_of_words_without_label.explode()`, but this is likely faster:
-                    co_occurrence_words = (w for word_iter in list_of_words_without_label for w in word_iter)
+                    # We could also use `lists_of_words_without_label.explode()`, but this is likely faster:
+                    co_occurrence_words = (w for word_iter in lists_of_words_without_label for w in word_iter)
                 else:
                     words = rows_with_label[f"word-{word_type}"]
                     other_word_type = next(iter({"original", "replacement"} - {word_type}))
