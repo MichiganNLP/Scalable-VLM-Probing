@@ -170,16 +170,30 @@ def _get_levin_category(word: str, dict_levin: Mapping[str, Collection[str]], ne
 
 
 def _get_nb_synsets(word: str, neg_type: NegType) -> int:  # noqa
-    # pos = _neg_type_to_pos(neg_type)
-    # synsets = wordnet.synsets(word, pos=pos)  # FIXME: why not using the POS?
+    # We don't use the POS information because we're using this as a proxy of ambiguity.
     synsets = wordnet.synsets(word)
     return len(synsets)
 
 
-def _get_hypernyms(word: str, neg_type: NegType) -> Sequence[str]:
+def _get_hypernyms(word: str, neg_type: NegType) -> Collection[str]:
+    # TODO: what if we return the synset names instead of the lemma names? The synset names are more specific.
+    #   The lemma names from different words may be intermixed.
     if synsets := wordnet.synsets(word, pos=_neg_type_to_pos(neg_type)):
-        hypernym_synsets = synsets[0].hypernyms() or synsets  # FIXME: why not using all the synsets?
-        return [hypernym_synsets[0]._lemma_names[0]]  # FIXME: why not returning all lemma names?
+        synset = synsets[0]  # The first synset is the most likely definition of the word.
+        return {lemma_name
+                for hypernym_synset in synset.hypernyms()
+                for lemma_name in hypernym_synset.lemma_names()}
+    else:
+        return [word]
+
+
+def _get_indirect_hypernyms(word: str, neg_type: NegType) -> Collection[str]:
+    if synsets := wordnet.synsets(word, pos=_neg_type_to_pos(neg_type)):
+        synset = synsets[0]  # The first synset is the most likely definition of the word.
+        return {lemma_name
+                for hypernym_synset in synset.hypernyms()  # We skip the direct hypernyms.
+                for s in hypernym_synset.closure(lambda s: s.hypernyms())
+                for lemma_name in s.lemma_names()}
     else:
         return [word]
 
@@ -322,6 +336,12 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
     if "hypernym" not in feature_deny_list:
         print("Computing the hypernyms…", end="")
         _compute_feature_for_each_word(df, "hypernym", lambda w, row: _get_hypernyms(w, row.neg_type),
+                                       compute_neg_features=compute_neg_features)
+        print(" ✓")
+
+    if "hypernym/indirect" not in feature_deny_list:
+        print("Computing the indirect hypernyms…", end="")
+        _compute_feature_for_each_word(df, "hypernym/indirect", lambda w, row: _get_indirect_hypernyms(w, row.neg_type),
                                        compute_neg_features=compute_neg_features)
         print(" ✓")
 
@@ -470,7 +490,7 @@ def _transform_features_to_numbers(
         dependent_variable = df.pop(dependent_variable_name)
 
     columns_to_drop = (list({"sentence", "neg_sentence", "pos_triplet", "neg_triplet", "clip prediction",
-                            "clip_score_diff", "pos_clip_score", "neg_clip_score"} - {dependent_variable_name})
+                             "clip_score_diff", "pos_clip_score", "neg_clip_score"} - {dependent_variable_name})
                        + [c for c in df.columns if "-common-" in c])
     df = df.drop(columns=list(columns_to_drop))
 
