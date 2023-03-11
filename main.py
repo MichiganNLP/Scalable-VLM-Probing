@@ -257,6 +257,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--examples", choices=EXAMPLE_MODES, default="top")
 
+    parser.add_argument("--plot", action="store_true")
+
     args = parser.parse_args()
 
     args.dependent_variable_name = (args.dependent_variable_name
@@ -313,57 +315,58 @@ def main() -> None:
 
     print(df.to_string())
 
-    top_k = 10
-    top_df = pd.concat([df.iloc[:top_k], df[-top_k:]])
+    if args.plot:
+        top_k = 10
+        top_df = pd.concat([df.iloc[:top_k], df[-top_k:]])
 
-    df_to_plot = top_df.reset_index(names="feature")
-    # Hack to get error bars (just one datapoint per feature would not call the function):
-    df_to_plot = pd.concat([df_to_plot, df_to_plot], ignore_index=True)
+        df_to_plot = top_df.reset_index(names="feature")
+        # Hack to get error bars (just one datapoint per feature would not call the function):
+        df_to_plot = pd.concat([df_to_plot, df_to_plot], ignore_index=True)
 
-    def _error_bar(x: pd.Series) -> Tuple[float, float]:
-        return tuple(df_to_plot.loc[x.index[0]][[f"[{(1 - confidence) / 2:.3f}",
-                                                 f"{(confidence + (1 - confidence) / 2):.3f}]"]])
+        def _error_bar(x: pd.Series) -> Tuple[float, float]:
+            return tuple(df_to_plot.loc[x.index[0]][[f"[{(1 - confidence) / 2:.3f}",
+                                                     f"{(confidence + (1 - confidence) / 2):.3f}]"]])
 
-    good_color, bad_color = sns.color_palette("deep", 4)[-2:]
-    sns.catplot(data=df_to_plot, x="coef", y="feature", errorbar=_error_bar, kind="point", join=False, aspect=1.5,
-                palette=[good_color] * top_k + [bad_color] * top_k)
-    plt.show()
+        good_color, bad_color = sns.color_palette("deep", 4)[-2:]
+        sns.catplot(data=df_to_plot, x="coef", y="feature", errorbar=_error_bar, kind="point", join=False, aspect=1.5,
+                    palette=[good_color] * top_k + [bad_color] * top_k)
+        plt.show()
 
-    # Hack to undo the standardization:
-    non_standardized_features = features.copy()
-    non_standardized_features[features == features.min()] = 0
-    non_standardized_features[features == features.max()] = 1
-    non_standardized_features = non_standardized_features.astype(int)
+        # Hack to undo the standardization:
+        non_standardized_features = features.copy()
+        non_standardized_features[features == features.min()] = 0
+        non_standardized_features[features == features.max()] = 1
+        non_standardized_features = non_standardized_features.astype(int)
 
-    binary_feature_names = [feature_name
-                            for feature_name in top_df.index[:2]
-                            if is_feature_binary(non_standardized_features[feature_name])]
-    binary_features = non_standardized_features[binary_feature_names]
-    non_standardized_dependent_variable = raw_features[args.dependent_variable_name]
-    repeated_dependent_variable = pd.concat([non_standardized_dependent_variable] * len(binary_features.columns),
-                                            ignore_index=True)
-    df_to_plot2 = pd.concat([binary_features.melt(var_name="feature"), repeated_dependent_variable], axis="columns")
+        binary_feature_names = [feature_name
+                                for feature_name in top_df.index[:2]
+                                if is_feature_binary(non_standardized_features[feature_name])]
+        binary_features = non_standardized_features[binary_feature_names]
+        non_standardized_dependent_variable = raw_features[args.dependent_variable_name]
+        repeated_dependent_variable = pd.concat([non_standardized_dependent_variable] * len(binary_features.columns),
+                                                ignore_index=True)
+        df_to_plot2 = pd.concat([binary_features.melt(var_name="feature"), repeated_dependent_variable], axis="columns")
 
-    sns.catplot(data=df_to_plot2, x=args.dependent_variable_name, y="feature", hue="value", kind="box", aspect=1.5)
-    plt.show()
+        sns.catplot(data=df_to_plot2, x=args.dependent_variable_name, y="feature", hue="value", kind="box", aspect=1.5)
+        plt.show()
 
-    df_to_plot3_1 = raw_features[["concreteness-common", args.dependent_variable_name]].copy()
-    df_to_plot3_1 = df_to_plot3_1.sort_values(by="concreteness-common")
-    df_to_plot3_1["type"] = "original"
+        df_to_plot3_1 = raw_features[["concreteness-common", args.dependent_variable_name]].copy()
+        df_to_plot3_1 = df_to_plot3_1.sort_values(by="concreteness-common")
+        df_to_plot3_1["type"] = "original"
 
-    sns.regplot(data=df_to_plot3_1, x="concreteness-common", y=args.dependent_variable_name,
-                line_kws={"color": "salmon"})
-    plt.show()
+        sns.regplot(data=df_to_plot3_1, x="concreteness-common", y=args.dependent_variable_name,
+                    line_kws={"color": "salmon"})
+        plt.show()
 
-    df_to_plot3_2 = df_to_plot3_1.copy()
-    df_to_plot3_2[args.dependent_variable_name] = scipy.signal.savgol_filter(
-        df_to_plot3_2[args.dependent_variable_name], window_length=1000, polyorder=3)
-    df_to_plot3_2["type"] = "smoothed"
+        df_to_plot3_2 = df_to_plot3_1.copy()
+        df_to_plot3_2[args.dependent_variable_name] = scipy.signal.savgol_filter(
+            df_to_plot3_2[args.dependent_variable_name], window_length=1000, polyorder=3)
+        df_to_plot3_2["type"] = "smoothed"
 
-    df_to_plot3 = pd.concat([df_to_plot3_1, df_to_plot3_2], ignore_index=True)
+        df_to_plot3 = pd.concat([df_to_plot3_1, df_to_plot3_2], ignore_index=True)
 
-    sns.relplot(data=df_to_plot3, x="concreteness-common", y=args.dependent_variable_name, hue="type", kind="line")
-    plt.show()
+        sns.relplot(data=df_to_plot3, x="concreteness-common", y=args.dependent_variable_name, hue="type", kind="line")
+        plt.show()
 
 
 if __name__ == "__main__":
