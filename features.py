@@ -22,6 +22,7 @@ from sklearn.utils.validation import check_is_fitted
 from sklearn_pandas import DataFrameMapper
 
 NegType = Literal["s", "v", "o"]
+Pos = Literal["n", "v"]
 Triplet = Tuple[str, str, str]
 
 VALID_NEG_TYPES = get_args(NegType)
@@ -96,6 +97,10 @@ def _load_clip_results(path: str) -> pd.DataFrame:
     return df
 
 
+def _neg_type_to_pos(neg_type: NegType) -> Pos:
+    return "v" if neg_type == "v" else "n"  # noqa
+
+
 def _parse_levin_file(path: str = PATH_LEVIN_VERBS, path_semantic_broad: str = PATH_LEVIN_SEMANTIC_BROAD,
                       return_mode: Literal["alternation", "semantic_broad", "semantic_fine_grained", "all"] = "all",
                       verbose: bool = True) -> Mapping[str, Collection[str]]:
@@ -166,19 +171,19 @@ def _parse_levin_file(path: str = PATH_LEVIN_VERBS, path_semantic_broad: str = P
         raise ValueError(f"Invalid return mode: {return_mode}")
 
 
-def _get_levin_category(word: str, dict_levin: Mapping[str, Collection[str]], neg_type: NegType) -> Collection[str]:
-    return dict_levin.get(word, []) if neg_type == "v" else []
+def _get_levin_category(word: str, dict_levin: Mapping[str, Collection[str]], pos: Pos) -> Collection[str]:
+    return dict_levin.get(word, []) if pos == "v" else []
 
 
-def _get_nb_synsets(word: str, neg_type: NegType) -> int:  # noqa
+def _get_nb_synsets(word: str, pos: Pos) -> int:  # noqa
     # We don't use the POS information because we're using this as a proxy of ambiguity.
     return len(wn.synsets(word))
 
 
-def _get_hypernyms(word: str, neg_type: NegType) -> Collection[str]:
+def _get_hypernyms(word: str, pos: Pos) -> Collection[str]:
     # TODO: what if we return the synset names instead of the lemma names? The synset names are more specific.
     #   The lemma names from different words may be intermixed.
-    if synsets := wn.synsets(word, pos=_neg_type_to_pos(neg_type)):
+    if synsets := wn.synsets(word, pos=pos):
         synset = synsets[0]  # The first synset is the most likely definition of the word.
         return {lemma_name
                 for hypernym_synset in synset.hypernyms()
@@ -190,8 +195,8 @@ def _get_hypernyms(word: str, neg_type: NegType) -> Collection[str]:
 warnings.filterwarnings("ignore", message="Discarded redundant search for Synset.*")
 
 
-def _get_indirect_hypernyms(word: str, neg_type: NegType) -> Collection[str]:
-    if synsets := wn.synsets(word, pos=_neg_type_to_pos(neg_type)):
+def _get_indirect_hypernyms(word: str, pos: Pos) -> Collection[str]:
+    if synsets := wn.synsets(word, pos=pos):
         synset = synsets[0]  # The first synset is the most likely definition of the word.
         return {lemma_name
                 for hypernym_synset in synset.hypernyms()  # We skip the direct hypernyms.
@@ -199,6 +204,10 @@ def _get_indirect_hypernyms(word: str, neg_type: NegType) -> Collection[str]:
                 for lemma_name in s.lemma_names()}
     else:
         return [word]
+
+
+def _get_frequency(word: str, word_frequencies: Mapping[str, int]) -> int:
+    return word_frequencies.get(word, 0)
 
 
 def _parse_liwc_file(path: str = PATH_LIWC, verbose: bool = True) -> Mapping[str, Sequence[str]]:
@@ -239,28 +248,21 @@ def _get_concreteness_score(word: str, dict_concreteness: Mapping[str, float]) -
     return dict_concreteness.get(word, float("nan"))
 
 
-def _neg_type_to_pos(neg_type: NegType) -> Literal["n", "v"]:
-    return "v" if neg_type == "v" else "n"  # noqa
-
-
-def _compute_wup_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
-    pos = _neg_type_to_pos(neg_type)
+def _compute_wup_similarity(word_original: str, word_replacement: str, pos: Pos) -> float:
     return max((synset_original.wup_similarity(synset_replacement)
                 for synset_original in wn.synsets(word_original, pos=pos)
                 for synset_replacement in wn.synsets(word_replacement, pos=pos)),
                default=float("nan"))
 
 
-def _compute_lch_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
-    pos = _neg_type_to_pos(neg_type)
+def _compute_lch_similarity(word_original: str, word_replacement: str, pos: Pos) -> float:
     return max((synset_original.lch_similarity(synset_replacement)
                 for synset_original in wn.synsets(word_original, pos=pos)
                 for synset_replacement in wn.synsets(word_replacement, pos=pos)),
                default=float("nan"))
 
 
-def _compute_path_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
-    pos = _neg_type_to_pos(neg_type)
+def _compute_path_similarity(word_original: str, word_replacement: str, pos: Pos) -> float:
     return max((synset_original.path_similarity(synset_replacement)
                 for synset_original in wn.synsets(word_original, pos=pos)
                 for synset_replacement in wn.synsets(word_replacement, pos=pos)),
@@ -279,15 +281,22 @@ def _get_common_words(triplet: Triplet, neg_type: NegType) -> Collection[str]:
     return [t for t, other_neg_type in zip(triplet, VALID_NEG_TYPES) if other_neg_type != neg_type]
 
 
-def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable[[str, pd.Series], Any],
+def _get_common_words_pos(neg_type: NegType) -> Collection[Pos]:
+    return [_neg_type_to_pos(other_neg_type) for other_neg_type in VALID_NEG_TYPES if other_neg_type != neg_type]
+
+
+def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable[[str, Pos], Any],
                                    compute_neg_features: bool = True) -> None:
     if compute_neg_features:
-        df[f"{prefix}-original"] = df.apply(lambda row: func(row["word-original"], row), axis=1)
-        df[f"{prefix}-replacement"] = df.apply(lambda row: func(row["word-replacement"], row), axis=1)
+        df[f"{prefix}-original"] = df.apply(lambda row: func(row["word-original"],
+                                                             _neg_type_to_pos(row.neg_type)), axis=1)
+        df[f"{prefix}-replacement"] = df.apply(lambda row: func(row["word-replacement"],
+                                                                _neg_type_to_pos(row.neg_type)), axis=1)
 
-    placeholder_result = pd.Series([func("dog", df.iloc[0])])
+    placeholder_result = pd.Series([func("dog", "n")])
 
-    common_results = df.apply(lambda row: [func(w, row) for w in row["words-common"]], axis=1)
+    common_results = df.apply(lambda row: [func(w, pos)
+                                           for w, pos in zip(row["words-common"], row["words-common-pos"])], axis=1)
 
     if np.issubdtype(placeholder_result.dtype, np.number):
         df[f"{prefix}-common"] = common_results.map(lambda r: sum(r) / len(r))
@@ -319,16 +328,17 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         df["word-original"] = df.apply(lambda row: _get_changed_word(row.pos_triplet, row.neg_type), axis=1)
         df["word-replacement"] = df.apply(lambda row: _get_changed_word(row.neg_triplet, row.neg_type), axis=1)
         df["words-common"] = df.apply(lambda row: _get_common_words(row.pos_triplet, row.neg_type), axis=1)
+        df["words-common-pos"] = df.neg_type.map(_get_common_words_pos)
     else:
         df["words-common"] = df.pos_triplet
+        df["words-common-pos"] = [[_neg_type_to_pos(neg_type) for neg_type in VALID_NEG_TYPES]] * len(df)
 
     for i in range(len(df["words-common"].iloc[0])):
         df[f"words-common-{i}"] = df["words-common"].str[i]
 
     if "Levin" not in feature_deny_list:
         dict_levin = _parse_levin_file()
-        _compute_feature_for_each_word(df, "Levin",
-                                       lambda w, row: _get_levin_category(w, dict_levin, row.neg_type),
+        _compute_feature_for_each_word(df, "Levin", lambda w, pos: _get_levin_category(w, dict_levin, pos),
                                        compute_neg_features=compute_neg_features)
 
     if "LIWC" not in feature_deny_list:
@@ -338,20 +348,19 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
 
     if "hypernym" not in feature_deny_list:
         print("Computing the hypernyms…", end="")
-        _compute_feature_for_each_word(df, "hypernym", lambda w, row: _get_hypernyms(w, row.neg_type),
-                                       compute_neg_features=compute_neg_features)
+        _compute_feature_for_each_word(df, "hypernym", _get_hypernyms, compute_neg_features=compute_neg_features)
         print(" ✓")
 
     if "hypernym/indirect" not in feature_deny_list:
         print("Computing the indirect hypernyms…", end="")
-        _compute_feature_for_each_word(df, "hypernym/indirect", lambda w, row: _get_indirect_hypernyms(w, row.neg_type),
+        _compute_feature_for_each_word(df, "hypernym/indirect", _get_indirect_hypernyms,
                                        compute_neg_features=compute_neg_features)
         print(" ✓")
 
     if "frequency" not in feature_deny_list:
         with open(PATH_WORD_FREQUENCIES) as json_file:
             word_frequencies = json.load(json_file)
-        _compute_feature_for_each_word(df, "frequency", lambda w, _: word_frequencies.get(w, 0),
+        _compute_feature_for_each_word(df, "frequency", lambda w, _: _get_frequency(w, word_frequencies),
                                        compute_neg_features=compute_neg_features)
 
     if "concreteness" not in feature_deny_list:
@@ -361,8 +370,7 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
 
     if "nb-synsets" not in feature_deny_list:
         print("Computing the number of synsets…", end="")
-        _compute_feature_for_each_word(df, "nb-synsets", lambda w, row: _get_nb_synsets(w, row.neg_type),
-                                       compute_neg_features=compute_neg_features)
+        _compute_feature_for_each_word(df, "nb-synsets", _get_nb_synsets, compute_neg_features=compute_neg_features)
         print(" ✓")
 
     if compute_similarity_features:
