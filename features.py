@@ -4,6 +4,7 @@ import ast
 import itertools
 import json
 import string
+import warnings
 from collections import Counter, defaultdict
 from typing import Any, Callable, Collection, Iterable, Literal, Mapping, MutableSequence, Sequence, Tuple, get_args
 
@@ -185,6 +186,9 @@ def _get_hypernyms(word: str, neg_type: NegType) -> Collection[str]:
                 for lemma_name in hypernym_synset.lemma_names()}
     else:
         return [word]
+
+
+warnings.filterwarnings("ignore", message="Discarded redundant search for Synset.*")
 
 
 def _get_indirect_hypernyms(word: str, neg_type: NegType) -> Collection[str]:
