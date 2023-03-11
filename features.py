@@ -378,7 +378,8 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         if "path-similarity" not in feature_deny_list and compute_neg_features:
             print("Computing the Path similarity…", end="")
             df["path-similarity"] = df.apply(
-                lambda row: _compute_path_similarity(row["word-original"], row["word-replacement"], row.neg_type), axis=1)
+                lambda row: _compute_path_similarity(row["word-original"], row["word-replacement"], row.neg_type),
+                axis=1)
             print(" ✓")
 
     print("Feature computation done.")
@@ -464,7 +465,7 @@ def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
 def _transform_features_to_numbers(
         df: pd.DataFrame, dependent_variable_name: str, standardize_dependent_variable: bool = True,
         standardize_binary_features: bool = True, feature_min_non_zero_values: int = 50,
-        merge_original_and_replacement_features: bool = True, verbose: bool = True) -> Tuple[pd.DataFrame, np.ndarray]:
+        merge_original_and_replacement_features: bool = True, verbose: bool = True) -> Tuple[pd.DataFrame, pd.Series]:
     if not standardize_dependent_variable:
         dependent_variable = df.pop(dependent_variable_name)
 
@@ -477,7 +478,7 @@ def _transform_features_to_numbers(
         feature_count = len(df.columns)
         if standardize_dependent_variable:
             feature_count -= 1
-        print("Number of features before transforming them into numerical:", feature_count)
+        print("Number of features before the transformation:", feature_count)
 
     transformers: MutableSequence[Tuple] = []
 
@@ -533,7 +534,7 @@ def _transform_features_to_numbers(
     return new_df, dependent_variable  # noqa
 
 
-def _describe_features(features: pd.DataFrame, dependent_variable: np.ndarray) -> None:
+def _describe_features(features: pd.DataFrame, dependent_variable: pd.Series) -> None:
     # FIXME: the main feature names doesn't work well. It should only split the binarized ones.
     main_feature_names = [feature_name.split("_")[0] for feature_name in features.columns]
     print(f"Features size:", len(features.columns), "--", Counter(main_feature_names))
@@ -549,7 +550,7 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
                               merge_original_and_replacement_features: bool = True,
                               feature_min_non_zero_values: int = 50, standardize_dependent_variable: bool = True,
                               standardize_binary_features: bool = True,
-                              verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
+                              verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     raw_features = _compute_features(clip_results, feature_deny_list=feature_deny_list,
                                      max_feature_count=max_feature_count, compute_neg_features=compute_neg_features,
                                      compute_similarity_features=compute_similarity_features)
@@ -569,7 +570,7 @@ def load_features(path: str, dependent_variable_name: str, max_feature_count: in
                   feature_deny_list: Collection[str] = frozenset(), standardize_dependent_variable: bool = True,
                   standardize_binary_features: bool = True, compute_neg_features: bool = True,
                   compute_similarity_features: bool = True, merge_original_and_replacement_features: bool = True,
-                  feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
+                  feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     clip_results = _load_clip_results(path)
     return _compute_numeric_features(
         clip_results, dependent_variable_name, max_feature_count=max_feature_count, feature_deny_list=feature_deny_list,
