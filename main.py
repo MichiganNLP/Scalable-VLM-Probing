@@ -122,10 +122,11 @@ def _value_contains_label(v: Any, label: str) -> bool:
 def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_features: pd.DataFrame,
                                            max_word_count: int = 5,
                                            sample_size: int | None = None) -> Tuple[Sequence[str], Sequence[str]]:
-    multi_label_features = {main_feature_name
-                            for feature_name in tqdm(feature_names, desc="Obtaining the multi-label features")
-                            if ((main_feature_name := feature_name.split("_", maxsplit=1)[0]) in raw_features
-                                and is_feature_multi_label(raw_features[main_feature_name]))}
+    multi_label_features = {main_name
+                            for name in tqdm(feature_names, desc="Obtaining the multi-label features")
+                            if ((main_name := name.split("_", maxsplit=1)[0]) in raw_features
+                                # We can just use a single value to infer the type:
+                                and is_feature_multi_label(raw_features.loc[raw_features.index[:1], main_name]))}
 
     examples = []
     co_occurrence_examples = []

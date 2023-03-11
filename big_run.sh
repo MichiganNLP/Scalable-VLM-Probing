@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=36
 #SBATCH --mem=180G
 #SBATCH --time=72:00:00
-#SBATCH --account=mihalcea0
+#SBATCH --account=mihalcea98
 #SBATCH --partition=standard
 
 module load python/3.10.4

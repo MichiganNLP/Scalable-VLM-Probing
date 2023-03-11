@@ -154,10 +154,10 @@ def _parse_levin_file(path: str = PATH_LEVIN_VERBS, path_semantic_broad: str = P
                 map_word_to_semantic_broad_class_names[broad_class_name].update(words)
 
     if verbose:
-        print(f"--Levin semantic broad nb classes:", len(semantic_broad_classes))
-        print(f"--Levin semantic fine-grained nb classes:", semantic_fine_grained_class_count)
-        print(f"--Levin alternations nb classes:", alternation_class_count)
-        print(f"--Levin total nb classes:", len(map_class_name_to_words))
+        print(f"--Levin semantic broad number of classes:", len(semantic_broad_classes))
+        print(f"--Levin semantic fine-grained number of classes:", semantic_fine_grained_class_count)
+        print(f"--Levin alternations number of class:", alternation_class_count)
+        print(f"Total number of Levin classes:", len(map_class_name_to_words))
 
     if return_mode == "alternation":
         return map_word_to_alternation_class_names
