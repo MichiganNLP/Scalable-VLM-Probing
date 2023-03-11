@@ -289,9 +289,9 @@ def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable
                                    compute_neg_features: bool = True) -> None:
     if compute_neg_features:
         df[f"{prefix}-original"] = df.apply(lambda row: func(row["word-original"],
-                                                             _neg_type_to_pos(row.neg_type)), axis=1)
+                                                             _neg_type_to_pos(row["neg-type"])), axis=1)
         df[f"{prefix}-replacement"] = df.apply(lambda row: func(row["word-replacement"],
-                                                                _neg_type_to_pos(row.neg_type)), axis=1)
+                                                                _neg_type_to_pos(row["neg-type"])), axis=1)
 
     placeholder_result = pd.Series([func("dog", "n")])
 
@@ -324,11 +324,14 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
 
     df = clip_results.copy()
 
+    # We use the underscore to separate a feature name from its value if it's binarized.
+    df = df.rename(columns={"neg_type": "neg-type"})
+
     if compute_neg_features:
-        df["word-original"] = df.apply(lambda row: _get_changed_word(row.pos_triplet, row.neg_type), axis=1)
-        df["word-replacement"] = df.apply(lambda row: _get_changed_word(row.neg_triplet, row.neg_type), axis=1)
-        df["words-common"] = df.apply(lambda row: _get_common_words(row.pos_triplet, row.neg_type), axis=1)
-        df["words-common-pos"] = df.neg_type.map(_get_common_words_pos)
+        df["word-original"] = df.apply(lambda row: _get_changed_word(row.pos_triplet, row["neg-type"]), axis=1)
+        df["word-replacement"] = df.apply(lambda row: _get_changed_word(row.neg_triplet, row["neg-type"]), axis=1)
+        df["words-common"] = df.apply(lambda row: _get_common_words(row.pos_triplet, row["neg-type"]), axis=1)
+        df["words-common-pos"] = df["neg-type"].map(_get_common_words_pos)
     else:
         df["words-common"] = df.pos_triplet
         df["words-common-pos"] = [[_neg_type_to_pos(neg_type) for neg_type in VALID_NEG_TYPES]] * len(df)
@@ -395,21 +398,21 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         if "wup-similarity" not in feature_deny_list and compute_neg_features:
             print("Computing the Wu-Palmer similarity…", end="")
             df["wup-similarity"] = df.apply(
-                lambda row: _compute_wup_similarity(row["word-original"], row["word-replacement"], row.neg_type),
+                lambda row: _compute_wup_similarity(row["word-original"], row["word-replacement"], row["neg-type"]),
                 axis=1)
             print(" ✓")
 
         if "lch-similarity" not in feature_deny_list and compute_neg_features:
             print("Computing the Leacock-Chodorow similarity…", end="")
             df["lch-similarity"] = df.apply(
-                lambda row: _compute_lch_similarity(row["word-original"], row["word-replacement"], row.neg_type),
+                lambda row: _compute_lch_similarity(row["word-original"], row["word-replacement"], row["neg-type"]),
                 axis=1)
             print(" ✓")
 
         if "path-similarity" not in feature_deny_list and compute_neg_features:
             print("Computing the Path similarity…", end="")
             df["path-similarity"] = df.apply(
-                lambda row: _compute_path_similarity(row["word-original"], row["word-replacement"], row.neg_type),
+                lambda row: _compute_path_similarity(row["word-original"], row["word-replacement"], row["neg-type"]),
                 axis=1)
             print(" ✓")
 
