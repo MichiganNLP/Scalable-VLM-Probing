@@ -10,7 +10,7 @@ from typing import Any, Callable, Collection, Iterable, Literal, Mapping, Mutabl
 
 import numpy as np
 import pandas as pd
-from nltk.corpus import wordnet
+from nltk.corpus import wordnet as wn
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from sentence_transformers import SentenceTransformer, util
 from sklearn.base import BaseEstimator
@@ -172,14 +172,13 @@ def _get_levin_category(word: str, dict_levin: Mapping[str, Collection[str]], ne
 
 def _get_nb_synsets(word: str, neg_type: NegType) -> int:  # noqa
     # We don't use the POS information because we're using this as a proxy of ambiguity.
-    synsets = wordnet.synsets(word)
-    return len(synsets)
+    return len(wn.synsets(word))
 
 
 def _get_hypernyms(word: str, neg_type: NegType) -> Collection[str]:
     # TODO: what if we return the synset names instead of the lemma names? The synset names are more specific.
     #   The lemma names from different words may be intermixed.
-    if synsets := wordnet.synsets(word, pos=_neg_type_to_pos(neg_type)):
+    if synsets := wn.synsets(word, pos=_neg_type_to_pos(neg_type)):
         synset = synsets[0]  # The first synset is the most likely definition of the word.
         return {lemma_name
                 for hypernym_synset in synset.hypernyms()
@@ -192,7 +191,7 @@ warnings.filterwarnings("ignore", message="Discarded redundant search for Synset
 
 
 def _get_indirect_hypernyms(word: str, neg_type: NegType) -> Collection[str]:
-    if synsets := wordnet.synsets(word, pos=_neg_type_to_pos(neg_type)):
+    if synsets := wn.synsets(word, pos=_neg_type_to_pos(neg_type)):
         synset = synsets[0]  # The first synset is the most likely definition of the word.
         return {lemma_name
                 for hypernym_synset in synset.hypernyms()  # We skip the direct hypernyms.
@@ -247,24 +246,24 @@ def _neg_type_to_pos(neg_type: NegType) -> Literal["n", "v"]:
 def _compute_wup_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
     pos = _neg_type_to_pos(neg_type)
     return max((synset_original.wup_similarity(synset_replacement)
-                for synset_original in wordnet.synsets(word_original, pos=pos)
-                for synset_replacement in wordnet.synsets(word_replacement, pos=pos)),
+                for synset_original in wn.synsets(word_original, pos=pos)
+                for synset_replacement in wn.synsets(word_replacement, pos=pos)),
                default=float("nan"))
 
 
 def _compute_lch_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
     pos = _neg_type_to_pos(neg_type)
     return max((synset_original.lch_similarity(synset_replacement)
-                for synset_original in wordnet.synsets(word_original, pos=pos)
-                for synset_replacement in wordnet.synsets(word_replacement, pos=pos)),
+                for synset_original in wn.synsets(word_original, pos=pos)
+                for synset_replacement in wn.synsets(word_replacement, pos=pos)),
                default=float("nan"))
 
 
 def _compute_path_similarity(word_original: str, word_replacement: str, neg_type: NegType) -> float:
     pos = _neg_type_to_pos(neg_type)
     return max((synset_original.path_similarity(synset_replacement)
-                for synset_original in wordnet.synsets(word_original, pos=pos)
-                for synset_replacement in wordnet.synsets(word_replacement, pos=pos)),
+                for synset_original in wn.synsets(word_original, pos=pos)
+                for synset_replacement in wn.synsets(word_replacement, pos=pos)),
                default=float("nan"))
 
 
