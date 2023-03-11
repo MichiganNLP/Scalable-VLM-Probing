@@ -11,6 +11,7 @@ from typing import Any, Collection, Iterable, Literal, Sequence, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import scipy
 import seaborn as sns
 import statsmodels.api as sm
 from sklearn import svm
@@ -344,6 +345,24 @@ def main() -> None:
     df_to_plot2 = pd.concat([binary_features.melt(var_name="feature"), repeated_dependent_variable], axis="columns")
 
     sns.catplot(data=df_to_plot2, x=args.dependent_variable_name, y="feature", hue="value", kind="box", aspect=1.5)
+    plt.show()
+
+    df_to_plot3_1 = raw_features[["concreteness-common", args.dependent_variable_name]].copy()
+    df_to_plot3_1 = df_to_plot3_1.sort_values(by="concreteness-common")
+    df_to_plot3_1["type"] = "original"
+
+    sns.regplot(data=df_to_plot3_1, x="concreteness-common", y=args.dependent_variable_name,
+                line_kws={"color": "salmon"})
+    plt.show()
+
+    df_to_plot3_2 = df_to_plot3_1.copy()
+    df_to_plot3_2[args.dependent_variable_name] = scipy.signal.savgol_filter(
+        df_to_plot3_2[args.dependent_variable_name], window_length=1000, polyorder=3)
+    df_to_plot3_2["type"] = "smoothed"
+
+    df_to_plot3 = pd.concat([df_to_plot3_1, df_to_plot3_2], ignore_index=True)
+
+    sns.relplot(data=df_to_plot3, x="concreteness-common", y=args.dependent_variable_name, hue="type", kind="line")
     plt.show()
 
 
