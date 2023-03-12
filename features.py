@@ -567,7 +567,9 @@ def _transform_features_to_numbers(
         new_df = pd.concat((new_df, pd.DataFrame.from_dict(new_columns)), axis="columns")
 
     if remove_correlated_features:  # From: https://stackoverflow.com/a/52509954/1165181
+        print("Computing the feature correlation matrix…", end="")
         corr_matrix = new_df.corr().abs()
+        print(" ✓")
         upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
         to_drop = [column for column in upper.columns if any(upper[column] >= confidence)]
         print("The following", len(to_drop), "features are correlated and will be removed:", to_drop)
