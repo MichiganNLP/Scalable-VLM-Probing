@@ -284,7 +284,7 @@ def main() -> None:
 
     max_data_count = 1000 if args.debug else args.max_data_count
 
-    print("Disabled features:", args.feature_deny_list)
+    print(args)
 
     raw_features, features, dependent_variable = load_features(
         path=args.input_path, dependent_variable_name=args.dependent_variable_name,
