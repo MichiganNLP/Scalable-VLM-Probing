@@ -25,7 +25,10 @@ NegType = Literal["s", "v", "o"]
 Pos = Literal["n", "v"]
 Triplet = Tuple[str, str, str]
 
+LevinReturnMode = Literal["alternation", "semantic_broad", "semantic_fine_grained", "all"]
+
 VALID_NEG_TYPES = get_args(NegType)
+VALID_LEVIN_RETURN_MODES = get_args(LevinReturnMode)
 
 PATH_LEVIN_VERBS = "data/levin_verbs.txt"
 PATH_LEVIN_SEMANTIC_BROAD = "data/levin_semantic_broad.json"
@@ -102,8 +105,7 @@ def _neg_type_to_pos(neg_type: NegType) -> Pos:
 
 
 def _parse_levin_file(path: str = PATH_LEVIN_VERBS, path_semantic_broad: str = PATH_LEVIN_SEMANTIC_BROAD,
-                      return_mode: Literal["alternation", "semantic_broad", "semantic_fine_grained", "all"] = "all",
-                      verbose: bool = True) -> Mapping[str, Collection[str]]:
+                      return_mode: LevinReturnMode = "all", verbose: bool = True) -> Mapping[str, Collection[str]]:
     content = ""
     map_class_name_to_words = {}
     with open(path) as file:
@@ -316,6 +318,7 @@ def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable
 
 def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[str] = frozenset(),
                       max_data_count: int | None = None, compute_neg_features: bool = True,
+                      levin_return_mode: LevinReturnMode = "all",
                       compute_similarity_features: bool = True) -> pd.DataFrame:
     print("Computing all the features…")
 
@@ -340,7 +343,7 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         df[f"words-common-{i}"] = df["words-common"].str[i]
 
     if "Levin" not in feature_deny_list:
-        dict_levin = _parse_levin_file()
+        dict_levin = _parse_levin_file(return_mode=levin_return_mode)
         _compute_feature_for_each_word(df, "Levin", lambda w, pos: _get_levin_category(w, dict_levin, pos),
                                        compute_neg_features=compute_neg_features)
 
@@ -601,7 +604,8 @@ def _describe_features(features: pd.DataFrame, dependent_variable: pd.Series) ->
 
 def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_name: str,
                               max_data_count: int | None = None, feature_deny_list: Collection[str] = frozenset(),
-                              compute_neg_features: bool = True, compute_similarity_features: bool = True,
+                              compute_neg_features: bool = True, levin_return_mode: LevinReturnMode = "all",
+                              compute_similarity_features: bool = True,
                               merge_original_and_replacement_features: bool = True,
                               feature_min_non_zero_values: int = 50, standardize_dependent_variable: bool = True,
                               standardize_binary_features: bool = True, remove_correlated_features: bool = True,
@@ -609,6 +613,7 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
                               verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     raw_features = _compute_features(clip_results, feature_deny_list=feature_deny_list,
                                      max_data_count=max_data_count, compute_neg_features=compute_neg_features,
+                                     levin_return_mode=levin_return_mode,
                                      compute_similarity_features=compute_similarity_features)
     features, dependent_variable = _transform_features_to_numbers(
         raw_features, dependent_variable_name, standardize_dependent_variable=standardize_dependent_variable,
@@ -627,15 +632,16 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
 def load_features(path: str, dependent_variable_name: str, max_data_count: int | None = None,
                   feature_deny_list: Collection[str] = frozenset(), standardize_dependent_variable: bool = True,
                   standardize_binary_features: bool = True, compute_neg_features: bool = True,
-                  compute_similarity_features: bool = True, merge_original_and_replacement_features: bool = True,
-                  remove_correlated_features: bool = True, feature_correlation_keep_threshold: float = .8,
+                  levin_return_mode: LevinReturnMode = "all", compute_similarity_features: bool = True,
+                  merge_original_and_replacement_features: bool = True, remove_correlated_features: bool = True,
+                  feature_correlation_keep_threshold: float = .8,
                   feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     clip_results = _load_clip_results(path)
     return _compute_numeric_features(
         clip_results, dependent_variable_name, max_data_count=max_data_count, feature_deny_list=feature_deny_list,
         standardize_dependent_variable=standardize_dependent_variable,
         standardize_binary_features=standardize_binary_features, compute_neg_features=compute_neg_features,
-        compute_similarity_features=compute_similarity_features,
+        levin_return_mode=levin_return_mode, compute_similarity_features=compute_similarity_features,
         merge_original_and_replacement_features=merge_original_and_replacement_features,
         remove_correlated_features=remove_correlated_features,
         feature_correlation_keep_threshold=feature_correlation_keep_threshold,

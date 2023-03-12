@@ -19,7 +19,7 @@ from sklearn.linear_model import Ridge
 from statsmodels.regression.linear_model import RegressionResults
 from tqdm.auto import tqdm
 
-from features import is_feature_binary, is_feature_multi_label, load_features
+from features import VALID_LEVIN_RETURN_MODES, is_feature_binary, is_feature_multi_label, load_features
 
 CLASSIFICATION_MODELS = {"dominance-score", "svm"}
 REGRESSION_MODELS = {"ols", "ridge"}
@@ -258,6 +258,7 @@ def parse_args() -> argparse.Namespace:
                         default={"wup-similarity", "lch-similarity", "path-similarity"})
     parser.add_argument("--feature-min-non-zero-values", type=int, default=50)
     parser.add_argument("--no-neg-features", dest="compute_neg_features", action="store_false")
+    parser.add_argument("--levin-return-mode", choices=VALID_LEVIN_RETURN_MODES, default="semantic_fine_grained")
     parser.add_argument("--merge-original-and-replacement-features", action="store_true")
     parser.add_argument("--no-remove-correlated-features", dest="remove_correlated_features", action="store_false")
     parser.add_argument("---feature-correlation-keep-threshold", type=float, default=.8)
