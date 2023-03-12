@@ -192,11 +192,15 @@ def compute_ols_regression(features: pd.DataFrame, dependent_variable: pd.Series
 
     if regularization:
         results = model.fit_regularized(L1_wt=0 if regularization == "ridge" else 1, alpha=alpha)
-        print("R^2:", RegressionResults(model, results.params).rsquared)
-        df = pd.DataFrame(results.params, columns=["coef"], index=features.columns)
     else:
         results = model.fit()
+
+    try:
         summary = results.summary()
+    except NotImplementedError:
+        summary = None
+
+    if summary:
         print(summary)
 
         table_as_html = summary.tables[1].as_html()
@@ -206,6 +210,9 @@ def compute_ols_regression(features: pd.DataFrame, dependent_variable: pd.Series
         print()
         print()
         print(f"Features whose coefficient is significantly different from zero ({len(df)}):")
+    else:
+        print("R^2:", RegressionResults(model, results.params).rsquared)
+        df = pd.DataFrame(results.params, columns=["coef"], index=features.columns)
 
     return df
 
