@@ -185,7 +185,7 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
 
 
 def compute_ols_regression(features: pd.DataFrame, dependent_variable: pd.Series, confidence: float = .95,
-                           regularization: Literal["ridge", "lasso"] | None = None, alpha: float = 0.1) -> pd.DataFrame:
+                           regularization: Literal["ridge", "lasso"] | None = None, alpha: float = 1.0) -> pd.DataFrame:
     features = sm.add_constant(features)
 
     model = sm.OLS(dependent_variable, features)
@@ -210,7 +210,7 @@ def compute_ols_regression(features: pd.DataFrame, dependent_variable: pd.Series
     return df
 
 
-def compute_ridge_regression(features: pd.DataFrame, dependent_variable: pd.Series, alpha: float = 0.1) -> pd.DataFrame:
+def compute_ridge_regression(features: pd.DataFrame, dependent_variable: pd.Series, alpha: float = 1.0) -> pd.DataFrame:
     model = Ridge(alpha=alpha)
     model.fit(features, dependent_variable)
     print("R^2:", model.score(features, dependent_variable))
@@ -254,7 +254,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--merge-original-and-replacement-features", action="store_true")
     parser.add_argument("--no-remove-correlated-features", dest="remove_correlated_features", action="store_false")
 
-    parser.add_argument("--alpha", type=float, default=0.1, help="Only applies to the ridge regression model.")
+    parser.add_argument("--alpha", type=float, default=1, help="Only applies to the ridge regression model.")
 
     parser.add_argument("--iterations", type=int, default=10_000, help="Only applies to the SVM model.")
 
