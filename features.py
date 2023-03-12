@@ -649,7 +649,7 @@ def load_features(path: str, dependent_variable_name: str, max_data_count: int |
 
 
 def is_feature_binary(feature: np.ndarray | pd.Series) -> bool:
-    return feature.dtype == bool or (np.issubdtype(feature.dtype, np.integer) and set(np.unique(feature)) == {0, 1})
+    return feature.dtype == bool or (np.issubdtype(feature.dtype, np.number) and set(np.unique(feature)) == {0, 1})
 
 
 def is_feature_multi_label(feature: np.ndarray | pd.Series) -> bool:
