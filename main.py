@@ -186,8 +186,6 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
 
 def compute_ols_regression(features: pd.DataFrame, dependent_variable: pd.Series, confidence: float = .95,
                            regularization: Literal["ridge", "lasso"] | None = None, alpha: float = 1.0) -> pd.DataFrame:
-    features = sm.add_constant(features)
-
     model = sm.OLS(dependent_variable, features)
 
     if regularization:

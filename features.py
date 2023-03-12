@@ -10,6 +10,7 @@ from typing import Any, Callable, Collection, Iterable, Literal, Mapping, Mutabl
 
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 from nltk.corpus import wordnet as wn
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from sentence_transformers import SentenceTransformer, util
@@ -578,9 +579,12 @@ def _transform_features_to_numbers(
         new_df = new_df2
         print("Number of features after the removal of constant features:", len(new_df.columns))
 
-    if remove_correlated_features:  # From: https://stackoverflow.com/a/52509954/1165181
+    new_df = sm.add_constant(new_df)
+
+    if remove_correlated_features:
         print("Computing the feature correlation matrix…", end="")
         # TODO: a chi-squared test would be better for binary data. But it should be done before standardization.
+        # From: https://stackoverflow.com/a/52509954/1165181
         corr_matrix = new_df.corr().abs()
         print(" ✓")
         upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
