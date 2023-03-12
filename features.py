@@ -320,7 +320,7 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
     print("Computing all the features…")
 
     if max_feature_count:
-        clip_results = clip_results.sample(max_feature_count)
+        clip_results = clip_results.sample(min(max_feature_count, len(clip_results)))
 
     df = clip_results.copy()
 
