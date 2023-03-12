@@ -499,7 +499,8 @@ def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
 def _transform_features_to_numbers(
         df: pd.DataFrame, dependent_variable_name: str, standardize_dependent_variable: bool = True,
         standardize_binary_features: bool = True, feature_min_non_zero_values: int = 50,
-        merge_original_and_replacement_features: bool = True, verbose: bool = True) -> Tuple[pd.DataFrame, pd.Series]:
+        merge_original_and_replacement_features: bool = True, remove_correlated_features: bool = True,
+        confidence: float = .95, verbose: bool = True) -> Tuple[pd.DataFrame, pd.Series]:
     if not standardize_dependent_variable:
         dependent_variable = df.pop(dependent_variable_name)
 
@@ -565,6 +566,13 @@ def _transform_features_to_numbers(
         new_df = new_df.drop(columns_to_remove, axis="columns")
         new_df = pd.concat((new_df, pd.DataFrame.from_dict(new_columns)), axis="columns")
 
+    if remove_correlated_features:  # From: https://stackoverflow.com/a/52509954/1165181
+        corr_matrix = new_df.corr().abs()
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        to_drop = [column for column in upper.columns if any(upper[column] >= confidence)]
+        print("The following", len(to_drop), "features are correlated and will be removed:", to_drop)
+        new_df.drop(to_drop, axis="columns", inplace=True)
+
     return new_df, dependent_variable  # noqa
 
 
@@ -583,7 +591,8 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
                               compute_neg_features: bool = True, compute_similarity_features: bool = True,
                               merge_original_and_replacement_features: bool = True,
                               feature_min_non_zero_values: int = 50, standardize_dependent_variable: bool = True,
-                              standardize_binary_features: bool = True,
+                              standardize_binary_features: bool = True, remove_correlated_features: bool = True,
+                              confidence: float = .95,
                               verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     raw_features = _compute_features(clip_results, feature_deny_list=feature_deny_list,
                                      max_feature_count=max_feature_count, compute_neg_features=compute_neg_features,
@@ -592,7 +601,8 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
         raw_features, dependent_variable_name, standardize_dependent_variable=standardize_dependent_variable,
         standardize_binary_features=standardize_binary_features,
         feature_min_non_zero_values=feature_min_non_zero_values,
-        merge_original_and_replacement_features=merge_original_and_replacement_features)
+        merge_original_and_replacement_features=merge_original_and_replacement_features,
+        remove_correlated_features=remove_correlated_features, confidence=confidence)
 
     if verbose:
         _describe_features(features, dependent_variable)
@@ -604,6 +614,7 @@ def load_features(path: str, dependent_variable_name: str, max_feature_count: in
                   feature_deny_list: Collection[str] = frozenset(), standardize_dependent_variable: bool = True,
                   standardize_binary_features: bool = True, compute_neg_features: bool = True,
                   compute_similarity_features: bool = True, merge_original_and_replacement_features: bool = True,
+                  remove_correlated_features: bool = True, confidence: float = .95,
                   feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     clip_results = _load_clip_results(path)
     return _compute_numeric_features(
@@ -612,6 +623,7 @@ def load_features(path: str, dependent_variable_name: str, max_feature_count: in
         standardize_binary_features=standardize_binary_features, compute_neg_features=compute_neg_features,
         compute_similarity_features=compute_similarity_features,
         merge_original_and_replacement_features=merge_original_and_replacement_features,
+        remove_correlated_features=remove_correlated_features, confidence=confidence,
         feature_min_non_zero_values=feature_min_non_zero_values)
 
 

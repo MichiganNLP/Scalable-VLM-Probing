@@ -242,13 +242,15 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="ols", choices=MODELS)
     parser.add_argument("--input-path", default="data/merged.csv")
+    parser.add_argument("--debug", action="store_true")
+
     parser.add_argument("--dependent-variable-name")
     parser.add_argument("-r", "--remove-features", dest="feature_deny_list", nargs="+",
                         default={"wup-similarity", "lch-similarity", "path-similarity"})
     parser.add_argument("--feature-min-non-zero-values", type=int, default=50)
     parser.add_argument("--no-neg-features", dest="compute_neg_features", action="store_false")
     parser.add_argument("--merge-original-and-replacement-features", action="store_true")
-    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--no-remove-correlated-features", dest="remove_correlated_features", action="store_false")
 
     parser.add_argument("--alpha", type=float, default=0.1, help="Only applies to the ridge regression model.")
 
@@ -285,6 +287,7 @@ def main() -> None:
         compute_neg_features=args.compute_neg_features,
         compute_similarity_features=args.model in REGRESSION_MODELS,
         merge_original_and_replacement_features=args.merge_original_and_replacement_features,
+        remove_correlated_features=args.remove_correlated_features, confidence=args.confidence,
         feature_min_non_zero_values=args.feature_min_non_zero_values)
 
     confidence = args.confidence
