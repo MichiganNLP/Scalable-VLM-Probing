@@ -299,7 +299,7 @@ def main() -> None:
         max_data_count=max_data_count, feature_deny_list=args.feature_deny_list,
         standardize_dependent_variable=args.model in REGRESSION_MODELS,
         standardize_binary_features=args.model in REGRESSION_MODELS,
-        compute_neg_features=args.compute_neg_features,
+        compute_neg_features=args.compute_neg_features, levin_return_mode=args.levin_return_mode,
         compute_similarity_features=args.model in REGRESSION_MODELS,
         merge_original_and_replacement_features=args.merge_original_and_replacement_features,
         remove_correlated_features=args.remove_correlated_features,
