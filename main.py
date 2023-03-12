@@ -253,6 +253,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-neg-features", dest="compute_neg_features", action="store_false")
     parser.add_argument("--merge-original-and-replacement-features", action="store_true")
     parser.add_argument("--no-remove-correlated-features", dest="remove_correlated_features", action="store_false")
+    parser.add_argument("---feature-correlation-keep-threshold", type=float, default=.8)
 
     parser.add_argument("--alpha", type=float, default=1, help="Only applies to the ridge regression model.")
 
@@ -293,7 +294,8 @@ def main() -> None:
         compute_neg_features=args.compute_neg_features,
         compute_similarity_features=args.model in REGRESSION_MODELS,
         merge_original_and_replacement_features=args.merge_original_and_replacement_features,
-        remove_correlated_features=args.remove_correlated_features, confidence=args.confidence,
+        remove_correlated_features=args.remove_correlated_features,
+        feature_correlation_keep_threshold=args.feature_correlation_keep_threshold,
         feature_min_non_zero_values=args.feature_min_non_zero_values)
 
     confidence = args.confidence
