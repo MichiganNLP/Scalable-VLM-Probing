@@ -242,6 +242,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="ols", choices=MODELS)
     parser.add_argument("--input-path", default="data/merged.csv")
+
+    parser.add_argument("--max-data-count", type=int)
     parser.add_argument("--debug", action="store_true")
 
     parser.add_argument("--dependent-variable-name")
@@ -264,6 +266,8 @@ def parse_args() -> argparse.Namespace:
 
     args = parser.parse_args()
 
+    assert args.max_data_count is None or not args.debug, "Cannot specify max data count in debug mode."
+
     args.dependent_variable_name = (args.dependent_variable_name
                                     or ("clip_score_diff" if args.model in REGRESSION_MODELS else "clip prediction"))
     args.feature_deny_list = set(args.feature_deny_list)
@@ -277,11 +281,13 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    max_data_count = 1000 if args.debug else args.max_data_count
+
     print("Disabled features:", args.feature_deny_list)
 
     raw_features, features, dependent_variable = load_features(
         path=args.input_path, dependent_variable_name=args.dependent_variable_name,
-        max_feature_count=1000 if args.debug else None, feature_deny_list=args.feature_deny_list,
+        max_data_count=max_data_count, feature_deny_list=args.feature_deny_list,
         standardize_dependent_variable=args.model in REGRESSION_MODELS,
         standardize_binary_features=args.model in REGRESSION_MODELS,
         compute_neg_features=args.compute_neg_features,

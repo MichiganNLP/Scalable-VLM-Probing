@@ -315,12 +315,12 @@ def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable
 
 
 def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[str] = frozenset(),
-                      max_feature_count: int | None = None, compute_neg_features: bool = True,
+                      max_data_count: int | None = None, compute_neg_features: bool = True,
                       compute_similarity_features: bool = True) -> pd.DataFrame:
     print("Computing all the features…")
 
-    if max_feature_count:
-        clip_results = clip_results.sample(min(max_feature_count, len(clip_results)))
+    if max_data_count:
+        clip_results = clip_results.sample(min(max_data_count, len(clip_results)))
 
     df = clip_results.copy()
 
@@ -589,7 +589,7 @@ def _describe_features(features: pd.DataFrame, dependent_variable: pd.Series) ->
 
 
 def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_name: str,
-                              max_feature_count: int | None = None, feature_deny_list: Collection[str] = frozenset(),
+                              max_data_count: int | None = None, feature_deny_list: Collection[str] = frozenset(),
                               compute_neg_features: bool = True, compute_similarity_features: bool = True,
                               merge_original_and_replacement_features: bool = True,
                               feature_min_non_zero_values: int = 50, standardize_dependent_variable: bool = True,
@@ -597,7 +597,7 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
                               confidence: float = .95,
                               verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     raw_features = _compute_features(clip_results, feature_deny_list=feature_deny_list,
-                                     max_feature_count=max_feature_count, compute_neg_features=compute_neg_features,
+                                     max_data_count=max_data_count, compute_neg_features=compute_neg_features,
                                      compute_similarity_features=compute_similarity_features)
     features, dependent_variable = _transform_features_to_numbers(
         raw_features, dependent_variable_name, standardize_dependent_variable=standardize_dependent_variable,
@@ -612,7 +612,7 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
     return raw_features, features, dependent_variable
 
 
-def load_features(path: str, dependent_variable_name: str, max_feature_count: int | None = None,
+def load_features(path: str, dependent_variable_name: str, max_data_count: int | None = None,
                   feature_deny_list: Collection[str] = frozenset(), standardize_dependent_variable: bool = True,
                   standardize_binary_features: bool = True, compute_neg_features: bool = True,
                   compute_similarity_features: bool = True, merge_original_and_replacement_features: bool = True,
@@ -620,7 +620,7 @@ def load_features(path: str, dependent_variable_name: str, max_feature_count: in
                   feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     clip_results = _load_clip_results(path)
     return _compute_numeric_features(
-        clip_results, dependent_variable_name, max_feature_count=max_feature_count, feature_deny_list=feature_deny_list,
+        clip_results, dependent_variable_name, max_data_count=max_data_count, feature_deny_list=feature_deny_list,
         standardize_dependent_variable=standardize_dependent_variable,
         standardize_binary_features=standardize_binary_features, compute_neg_features=compute_neg_features,
         compute_similarity_features=compute_similarity_features,
