@@ -184,13 +184,9 @@ def _get_nb_synsets(word: str, pos: Pos) -> int:  # noqa
 
 
 def _get_hypernyms(word: str, pos: Pos) -> Collection[str]:
-    # TODO: what if we return the synset names instead of the lemma names? The synset names are more specific.
-    #   The lemma names from different words may be intermixed.
     if synsets := wn.synsets(word, pos=pos):
-        synset = synsets[0]  # The first synset is the most likely definition of the word.
-        return {lemma_name
-                for hypernym_synset in synset.hypernyms()
-                for lemma_name in hypernym_synset.lemma_names()}
+        # The first synset is the most likely definition of the word.
+        return {hypernym_synset.name() for hypernym_synset in synsets[0].hypernyms()}
     else:
         return [word]
 
@@ -200,13 +196,12 @@ warnings.filterwarnings("ignore", message="Discarded redundant search for Synset
 
 def _get_indirect_hypernyms(word: str, pos: Pos) -> Collection[str]:
     if synsets := wn.synsets(word, pos=pos):
-        synset = synsets[0]  # The first synset is the most likely definition of the word.
-        return {lemma_name
-                for hypernym_synset in synset.hypernyms()  # We skip the direct hypernyms.
-                for s in hypernym_synset.closure(lambda s: s.hypernyms())
-                for lemma_name in s.lemma_names()}
+        # The first synset is the most likely definition of the word.
+        return {s.name()
+                for hypernym_synset in synsets[0].hypernyms()  # We skip the direct hypernyms.
+                for s in hypernym_synset.closure(lambda s: s.hypernyms())}
     else:
-        return [word]
+        return []
 
 
 def _get_frequency(word: str, word_frequencies: Mapping[str, int]) -> int:
