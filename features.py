@@ -14,7 +14,7 @@ from nltk.corpus import wordnet as wn
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from sentence_transformers import SentenceTransformer, util
 from sklearn.base import BaseEstimator
-from sklearn.feature_selection import SelectorMixin
+from sklearn.feature_selection import SelectorMixin, VarianceThreshold
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardScaler
@@ -566,6 +566,15 @@ def _transform_features_to_numbers(
         new_df = new_df.drop(columns_to_remove, axis="columns")
         new_df = pd.concat((new_df, pd.DataFrame.from_dict(new_columns)), axis="columns")
 
+    print("Number of features after the transformation:", len(new_df.columns))
+
+    new_df2 = VarianceThreshold().set_output(transform="pandas").fit_transform(new_df)
+    if len(new_df.columns) != len(new_df2.columns):
+        print("Removed", len(new_df.columns) - len(new_df2.columns), "constant features:",
+              set(new_df.columns) - set(new_df2.columns))
+        new_df = new_df2
+        print("Number of features after the removal of constant features:", len(new_df.columns))
+
     if remove_correlated_features:  # From: https://stackoverflow.com/a/52509954/1165181
         print("Computing the feature correlation matrix…", end="")
         corr_matrix = new_df.corr().abs()
@@ -574,6 +583,7 @@ def _transform_features_to_numbers(
         to_drop = [column for column in upper.columns if any(upper[column] >= confidence)]
         print("The following", len(to_drop), "features are correlated and will be removed:", to_drop)
         new_df.drop(to_drop, axis="columns", inplace=True)
+        print("Number of features after the removal of correlated features:", len(new_df.columns))
 
     return new_df, dependent_variable  # noqa
 
