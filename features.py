@@ -21,6 +21,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardScaler
 from sklearn.utils.validation import check_is_fitted
 from sklearn_pandas import DataFrameMapper
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+from tqdm.auto import trange
 
 NegType = Literal["s", "v", "o"]
 Pos = Literal["n", "v"]
@@ -96,7 +98,8 @@ def _load_clip_results(path: str) -> pd.DataFrame:
     df.neg_type = df.neg_type.str.get(0)
     assert df.neg_type.isin(VALID_NEG_TYPES).all()
 
-    df["clip prediction"] = df["clip prediction"] == "pos"
+    # df["clip prediction"] = df["clip prediction"] == "pos"
+    df["clip prediction"] = df["pos_clip_score"] >= df["pos_clip_score"].mean()
 
     return df
 
@@ -188,7 +191,7 @@ def _get_hypernyms(word: str, pos: Pos) -> Collection[str]:
         # The first synset is the most likely definition of the word.
         return {hypernym_synset.name() for hypernym_synset in synsets[0].hypernyms()}
     else:
-        return [word]
+        return []
 
 
 warnings.filterwarnings("ignore", message="Discarded redundant search for Synset.*")
@@ -499,7 +502,8 @@ def _transform_features_to_numbers(
         df: pd.DataFrame, dependent_variable_name: str, standardize_dependent_variable: bool = True,
         standardize_binary_features: bool = True, feature_min_non_zero_values: int = 50,
         merge_original_and_replacement_features: bool = True, remove_correlated_features: bool = True,
-        feature_correlation_keep_threshold: float = .8, verbose: bool = True) -> Tuple[pd.DataFrame, pd.Series]:
+        feature_correlation_keep_threshold: float = .8, do_vif: bool = False,
+        verbose: bool = True) -> Tuple[pd.DataFrame, pd.Series]:
     if not standardize_dependent_variable:
         dependent_variable = df.pop(dependent_variable_name)
 
@@ -588,6 +592,21 @@ def _transform_features_to_numbers(
         new_df.drop(to_drop, axis="columns", inplace=True)
         print("Number of features after the removal of correlated features:", len(new_df.columns))
 
+        if do_vif:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="divide by zero encountered in scalar divide.*")
+                with trange(len(new_df.columns), desc="Removing correlated features") as progress_bar:
+                    for _ in progress_bar:
+                        c_max_vif, max_vif = max(((c, variance_inflation_factor(new_df.values, i))
+                                                  for i, c in enumerate(new_df.columns)),
+                                                 key=lambda t: t[1])
+                        if max_vif < 5:
+                            break
+                        new_df = new_df.drop(c_max_vif, axis="columns")
+                        progress_bar.set_postfix_str(f"Removed {c_max_vif} (VIF={max_vif:.2f})")
+            print(f"Final largest VIF ({max_vif}) comes from {c_max_vif}.")
+            print("Number of features after the removal of correlated features based on VIF:", len(new_df.columns))
+
     return new_df, dependent_variable  # noqa
 
 
@@ -608,7 +627,7 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
                               merge_original_and_replacement_features: bool = True,
                               feature_min_non_zero_values: int = 50, standardize_dependent_variable: bool = True,
                               standardize_binary_features: bool = True, remove_correlated_features: bool = True,
-                              feature_correlation_keep_threshold: float = .8,
+                              feature_correlation_keep_threshold: float = .8, do_vif: bool = False,
                               verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     raw_features = _compute_features(clip_results, feature_deny_list=feature_deny_list,
                                      max_data_count=max_data_count, compute_neg_features=compute_neg_features,
@@ -620,7 +639,7 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
         feature_min_non_zero_values=feature_min_non_zero_values,
         merge_original_and_replacement_features=merge_original_and_replacement_features,
         remove_correlated_features=remove_correlated_features,
-        feature_correlation_keep_threshold=feature_correlation_keep_threshold)
+        feature_correlation_keep_threshold=feature_correlation_keep_threshold, do_vif=do_vif)
 
     if verbose:
         _describe_features(features, dependent_variable)
@@ -633,7 +652,7 @@ def load_features(path: str, dependent_variable_name: str, max_data_count: int |
                   standardize_binary_features: bool = True, compute_neg_features: bool = True,
                   levin_return_mode: LevinReturnMode = "all", compute_similarity_features: bool = True,
                   merge_original_and_replacement_features: bool = True, remove_correlated_features: bool = True,
-                  feature_correlation_keep_threshold: float = .8,
+                  feature_correlation_keep_threshold: float = .8, do_vif: bool = False,
                   feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     clip_results = _load_clip_results(path)
     return _compute_numeric_features(
@@ -643,7 +662,7 @@ def load_features(path: str, dependent_variable_name: str, max_data_count: int |
         levin_return_mode=levin_return_mode, compute_similarity_features=compute_similarity_features,
         merge_original_and_replacement_features=merge_original_and_replacement_features,
         remove_correlated_features=remove_correlated_features,
-        feature_correlation_keep_threshold=feature_correlation_keep_threshold,
+        feature_correlation_keep_threshold=feature_correlation_keep_threshold, do_vif=do_vif,
         feature_min_non_zero_values=feature_min_non_zero_values)
 
 
