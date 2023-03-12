@@ -507,7 +507,7 @@ def _transform_features_to_numbers(
     if not standardize_dependent_variable:
         dependent_variable = df.pop(dependent_variable_name)
 
-    columns_to_drop = (list({"sentence", "neg_sentence", "pos_triplet", "neg_triplet", "clip prediction",
+    columns_to_drop = (list({"sentence", "neg_sentence", "neg-type", "pos_triplet", "neg_triplet", "clip prediction",
                              "clip_score_diff", "pos_clip_score", "neg_clip_score"} - {dependent_variable_name})
                        + [c for c in df.columns if "-common-" in c])
     df = df.drop(columns=list(columns_to_drop))
