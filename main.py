@@ -12,7 +12,7 @@ import scipy
 import seaborn as sns
 import statsmodels.api as sm
 from sklearn import svm
-from sklearn.linear_model import Ridge
+from sklearn.ensemble import RandomForestRegressor
 from statsmodels.base.model import LikelihoodModelResults
 from statsmodels.regression.linear_model import RegressionResults
 from statsmodels.tools.tools import pinv_extended
@@ -129,12 +129,11 @@ def compute_ols_regression(features: pd.DataFrame, dependent_variable: pd.Series
     return df
 
 
-def compute_sklearn_regression(features: pd.DataFrame, dependent_variable: pd.Series,
-                               alpha: float = 1.0) -> pd.DataFrame:
-    model = Ridge(alpha=alpha)
+def compute_sklearn_regression(features: pd.DataFrame, dependent_variable: pd.Series) -> pd.DataFrame:
+    model = RandomForestRegressor(n_jobs=-1, verbose=1)
     model.fit(features, dependent_variable)
     print("R^2:", model.score(features, dependent_variable))
-    return pd.DataFrame(model.coef_, columns=["coef"], index=features.columns)
+    return pd.DataFrame(model.feature_importances_, columns=["coef"], index=features.columns)
 
 
 def compute_dominance_score(features: pd.DataFrame, dependent_variable: pd.Series) -> pd.DataFrame:
@@ -229,7 +228,7 @@ def main() -> None:
         regularization = {"ols": None}.get(args.model, args.model)
         df = compute_ols_regression(features, dependent_variable, regularization=regularization, alpha=args.alpha)
     elif args.model == "sklearn":
-        df = compute_sklearn_regression(features, dependent_variable, alpha=args.alpha)
+        df = compute_sklearn_regression(features, dependent_variable)
     elif args.model == "dominance-score":
         df = compute_dominance_score(features, dependent_variable)
     elif args.model == "sklearn-clf":
