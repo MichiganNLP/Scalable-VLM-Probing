@@ -612,7 +612,6 @@ def _transform_features_to_numbers(
 
 
 def _describe_features(features: pd.DataFrame, dependent_variable: pd.Series) -> None:
-    # FIXME: the main feature names doesn't work well. It should only split the binarized ones.
     main_feature_names = [feature_name.split("_")[0] for feature_name in features.columns]
     print(f"Features size:", len(features.columns), "--", Counter(main_feature_names))
     print(f"Features shape:", features.shape)
