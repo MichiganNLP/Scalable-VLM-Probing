@@ -187,7 +187,6 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--iterations", type=int, default=10_000, help="Only applies to the SVM model.")
 
-    parser.add_argument("--manual-significance-test", action="store_true")
     parser.add_argument("--confidence", type=float, default=.95)
 
     parser.add_argument("--examples", choices=EXAMPLE_MODES, default="top")
