@@ -4,12 +4,9 @@ from __future__ import annotations
 import argparse
 import itertools
 from collections import Counter
-from functools import partial
-from multiprocessing import Pool
 from typing import Any, Collection, Iterable, Literal, Sequence, Tuple
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import scipy
 import seaborn as sns
@@ -23,58 +20,14 @@ from tqdm.auto import tqdm
 
 from features import VALID_LEVIN_RETURN_MODES, is_feature_binary, is_feature_multi_label, load_features
 
-CLASSIFICATION_MODELS = {"dominance-score", "svm"}
-REGRESSION_MODELS = {"ols", "ridge"}
+CLASSIFICATION_MODELS = {"dominance-score", "sklearn-clf"}
+REGRESSION_MODELS = {"ols", "ridge", "lasso", "sklearn"}
 MODELS = CLASSIFICATION_MODELS | REGRESSION_MODELS
 
 EXAMPLE_MODES = ["top", "sample", "disabled"]
 
 
 pd.options.display.float_format = "{:,.3f}".format
-
-
-def _build_classifier_svm() -> svm.LinearSVC:
-    return svm.LinearSVC(class_weight="balanced", max_iter=1_000_000)
-
-
-def _classify_shuffled_svm(features: pd.DataFrame, dependent_variable: pd.Series, seed: int) -> np.ndarray:
-    rng = np.random.default_rng(seed)
-
-    features = features.sample(frac=1, random_state=rng)
-
-    clf = _build_classifier_svm()
-    clf.fit(features, dependent_variable)
-
-    return abs(clf.coef_.ravel())
-
-
-def _analyze_coef_weights_svm(features: pd.DataFrame, dependent_variable: pd.Series,
-                              iterations: int = 10_000) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    clf = _build_classifier_svm()
-
-    print("Computing the coefficients with the real features…")
-    clf.fit(features, dependent_variable)
-    print("Coefficients computed.")
-
-    coef_weights = clf.coef_.ravel()
-    coef_sign = np.sign(coef_weights)
-    coef_weights = abs(coef_weights)
-
-    with Pool() as pool:
-        list_shuffled_coef_weights = list(tqdm(
-            pool.imap_unordered(partial(_classify_shuffled_svm, features, dependent_variable), range(iterations)),
-            total=iterations, desc="Computing the coefficients with shuffled columns"))
-
-    coef_significance = np.array([sum(list_coef[i] <= coef for list_coef in list_shuffled_coef_weights)
-                                  for i, coef in enumerate(coef_weights)])
-
-    return coef_weights, coef_significance, coef_sign
-
-
-def compute_svm_regression(features: pd.DataFrame, dependent_variable: pd.Series,
-                           iterations: int = 10_000) -> pd.DataFrame:
-    coef_weights, coef_significance, coef_sign = _analyze_coef_weights_svm(features, dependent_variable, iterations)
-    return pd.DataFrame(coef_weights, columns=["coef"], index=features.columns)
 
 
 def _value_contains_label(v: Any, label: str) -> bool:
@@ -156,6 +109,7 @@ def compute_ols_regression(features: pd.DataFrame, dependent_variable: pd.Series
     model = sm.OLS(dependent_variable, features)
 
     if regularization:
+        alpha /= len(features)  # See https://stackoverflow.com/a/72260809/1165181
         results = model.fit_regularized(L1_wt=0 if regularization == "ridge" else 1, alpha=alpha)
     else:
         results = model.fit()
@@ -175,7 +129,8 @@ def compute_ols_regression(features: pd.DataFrame, dependent_variable: pd.Series
     return df
 
 
-def compute_ridge_regression(features: pd.DataFrame, dependent_variable: pd.Series, alpha: float = 1.0) -> pd.DataFrame:
+def compute_sklearn_regression(features: pd.DataFrame, dependent_variable: pd.Series,
+                               alpha: float = 1.0) -> pd.DataFrame:
     model = Ridge(alpha=alpha)
     model.fit(features, dependent_variable)
     print("R^2:", model.score(features, dependent_variable))
@@ -201,6 +156,12 @@ def compute_dominance_score(features: pd.DataFrame, dependent_variable: pd.Serie
             dominance_scores[column] = pos_coverage / neg_coverage
 
     return pd.DataFrame(dominance_scores.values(), columns=["coef"], index=dominance_scores.keys())  # noqa
+
+
+def compute_sklearn_clf(features: pd.DataFrame, dependent_variable: pd.Series) -> pd.DataFrame:
+    clf = svm.LinearSVC(class_weight="balanced", max_iter=1_000_000)
+    clf.fit(features, dependent_variable)
+    return pd.DataFrame(clf.coef_, columns=["coef"], index=features.columns)
 
 
 def parse_args() -> argparse.Namespace:
@@ -265,14 +226,15 @@ def main() -> None:
         feature_correlation_keep_threshold=args.feature_correlation_keep_threshold, do_vif=args.do_vif,
         feature_min_non_zero_values=args.feature_min_non_zero_values)
 
-    if args.model == "dominance-score":
+    if args.model in {"ols", "ridge", "lasso"}:
+        regularization = {"ols": None}.get(args.model, args.model)
+        df = compute_ols_regression(features, dependent_variable, regularization=regularization, alpha=args.alpha)
+    elif args.model == "sklearn":
+        df = compute_sklearn_regression(features, dependent_variable, alpha=args.alpha)
+    elif args.model == "dominance-score":
         df = compute_dominance_score(features, dependent_variable)
-    elif args.model == "ols":
-        df = compute_ols_regression(features, dependent_variable, alpha=args.alpha)
-    elif args.model == "ridge":
-        df = compute_ridge_regression(features, dependent_variable, alpha=args.alpha)
-    elif args.model == "svm":
-        df = compute_svm_regression(features, dependent_variable, iterations=args.iterations)
+    elif args.model == "sklearn-clf":
+        df = compute_sklearn_clf(features, dependent_variable)
     else:
         raise ValueError(f"Unknown model: {args.model} (should be in {MODELS}).")
 
