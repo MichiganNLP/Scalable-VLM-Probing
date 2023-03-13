@@ -100,6 +100,7 @@ def _load_clip_results(path: str) -> pd.DataFrame:
 
     # df["clip prediction"] = df["clip prediction"] == "pos"
     df["clip prediction"] = df["pos_clip_score"] >= df["pos_clip_score"].mean()
+    # df["clip prediction"] = df["neg_clip_score"] >= df["neg_clip_score"].mean()
 
     return df
 
@@ -509,7 +510,7 @@ def _transform_features_to_numbers(
 
     columns_to_drop = (list({"sentence", "neg_sentence", "neg-type", "pos_triplet", "neg_triplet", "clip prediction",
                              "clip_score_diff", "pos_clip_score", "neg_clip_score"} - {dependent_variable_name})
-                       + [c for c in df.columns if "-common-" in c])
+                       + [c for c in df.columns if "-common-" in c] + [c for c in df.columns if c.startswith("word")])
     df = df.drop(columns=list(columns_to_drop))
 
     if verbose:

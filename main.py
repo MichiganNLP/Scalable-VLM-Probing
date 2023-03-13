@@ -14,9 +14,13 @@ import pandas as pd
 import scipy
 import seaborn as sns
 import statsmodels.api as sm
+from scipy.stats import stats
 from sklearn import svm
+from sklearn import feature_selection
 from sklearn.linear_model import Ridge
+from statsmodels.base.model import LikelihoodModelResults
 from statsmodels.regression.linear_model import RegressionResults
+from statsmodels.tools.tools import pinv_extended
 from tqdm.auto import tqdm
 
 from features import VALID_LEVIN_RETURN_MODES, is_feature_binary, is_feature_multi_label, load_features
@@ -309,6 +313,15 @@ def main() -> None:
 
     if args.model == "dominance-score":
         df = compute_dominance_score(features, dependent_variable)
+        # pinv = pinv_extended(features[df.index])[0]
+        # normalized_cov_params = pinv @ pinv.T
+        # results = LikelihoodModelResults(None, df.coef, normalized_cov_params=normalized_cov_params)
+        # keep = results.pvalues <= (1 - args.confidence)
+
+        # confidence_intervals = results.conf_int(alpha=(1 - args.confidence))
+        # df[f"[{(1 - confidence) / 2:.3f}"] = confidence_intervals[:, 0]
+        # df[f"{(confidence + (1 - confidence) / 2):.3f}]"] = confidence_intervals[:, 1]
+
     elif args.model == "ols":
         df = compute_ols_regression(features, dependent_variable, confidence=confidence, alpha=args.alpha)
     elif args.model == "ridge":
