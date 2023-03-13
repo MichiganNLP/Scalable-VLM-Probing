@@ -4,7 +4,7 @@
 #SBATCH --mail-type=BEGIN,FAIL,END
 #SBATCH --cpus-per-task=36
 #SBATCH --mem=180G
-#SBATCH --time=24:00:00
+#SBATCH --time=16:00:00
 #SBATCH --account=mihalcea98
 #SBATCH --partition=standard
 
