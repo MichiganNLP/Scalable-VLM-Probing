@@ -328,6 +328,13 @@ def main() -> None:
         sns.relplot(data=df_to_plot3, x="concreteness-common", y=args.dependent_variable_name, hue="type", kind="line")
         plt.show()
 
+        sns.displot(data=raw_features, x="frequency-common", y=args.dependent_variable_name, kind="kde",
+                    log_scale=[True, False])
+        plt.show()
+
+        sns.displot(data=raw_features, x=args.dependent_variable_name, kind="kde")
+        plt.show()
+
 
 if __name__ == "__main__":
     main()
