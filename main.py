@@ -30,6 +30,9 @@ MODELS = CLASSIFICATION_MODELS | REGRESSION_MODELS
 EXAMPLE_MODES = ["top", "sample", "disabled"]
 
 
+pd.options.display.float_format = "{:,.3f}".format
+
+
 def _build_classifier_svm() -> svm.LinearSVC:
     return svm.LinearSVC(class_weight="balanced", max_iter=1_000_000)
 
