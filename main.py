@@ -14,9 +14,7 @@ import pandas as pd
 import scipy
 import seaborn as sns
 import statsmodels.api as sm
-from scipy.stats import stats
 from sklearn import svm
-from sklearn import feature_selection
 from sklearn.linear_model import Ridge
 from statsmodels.base.model import LikelihoodModelResults
 from statsmodels.regression.linear_model import RegressionResults
@@ -30,42 +28,6 @@ REGRESSION_MODELS = {"ols", "ridge"}
 MODELS = CLASSIFICATION_MODELS | REGRESSION_MODELS
 
 EXAMPLE_MODES = ["top", "sample", "disabled"]
-
-
-def _plot_coef_weights_svm(coef_weights: np.ndarray, features: pd.DataFrame,
-                           path: str = "data/coef_importance.png", top_features: int = 5) -> None:
-    coef = coef_weights.ravel()  # flatten array
-    top_positive_coefficients = np.argsort(coef)[-top_features:]
-    top_negative_coefficients = np.argsort(coef)[:top_features]
-    top_coefficients = np.hstack([top_negative_coefficients, top_positive_coefficients])
-
-    fig = plt.figure(figsize=(18, 7))
-    colors = ["red" if c < 0 else "green" for c in coef[top_coefficients]]
-    plt.bar(np.arange(2 * top_features), coef[top_coefficients], color=colors)
-    feature_names = features.columns
-    plt.xticks(np.arange(2 * top_features), feature_names[top_coefficients], rotation=45, ha="right")
-    fig.savefig(path, bbox_inches="tight")
-
-
-# https://www.kaggle.com/code/pierpaolo28/pima-indians-diabetes-database/notebook
-def _print_sorted_coef_weights_svm(coef: np.ndarray, coef_significance: np.ndarray, coef_sign: np.ndarray,
-                                   features: pd.DataFrame, output_path: str = "data/sorted_features.csv") -> None:
-    sorted_coefficients_idx = np.argsort(coef)[::-1]  # In descending order.
-    sorted_coefficients = [np.round(weight, 2) for weight in coef[sorted_coefficients_idx]]
-
-    feature_names = features.columns
-    sorted_feature_names = feature_names[sorted_coefficients_idx].array
-    sorted_feature_significance = coef_significance[sorted_coefficients_idx].array
-    sorted_feature_sign = coef_sign[sorted_coefficients_idx].array
-
-    sorted_features = features[sorted_feature_names]
-    sorted_feature_counts = (sorted_features != 0 & sorted_features.notna()).sum(axis=0)
-
-    df = pd.DataFrame(
-        zip(sorted_feature_names, sorted_feature_significance, sorted_feature_counts, sorted_coefficients,
-            sorted_feature_sign),
-        columns=["Feature", "Significance", "Not zero nor NaN", "Weight (abs)", "Weight sign"])
-    df.to_csv(output_path, index=False)
 
 
 def _build_classifier_svm() -> svm.LinearSVC:
@@ -109,8 +71,6 @@ def _analyze_coef_weights_svm(features: pd.DataFrame, dependent_variable: pd.Ser
 def compute_svm_regression(features: pd.DataFrame, dependent_variable: pd.Series,
                            iterations: int = 10_000) -> pd.DataFrame:
     coef_weights, coef_significance, coef_sign = _analyze_coef_weights_svm(features, dependent_variable, iterations)
-    _print_sorted_coef_weights_svm(coef_weights, coef_significance, coef_sign, features)
-    _plot_coef_weights_svm(coef_weights, features)
     return pd.DataFrame(coef_weights, columns=["coef"], index=features.columns)
 
 
@@ -127,7 +87,7 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
                                            max_word_count: int = 5,
                                            sample_size: int | None = None) -> Tuple[Sequence[str], Sequence[str]]:
     multi_label_features = {main_name
-                            for name in tqdm(feature_names, desc="Obtaining the multi-label features")
+                            for name in feature_names
                             if ((main_name := name.split("_", maxsplit=1)[0]) in raw_features
                                 # We can just use a single value to infer the type:
                                 and is_feature_multi_label(raw_features.loc[raw_features.index[:1], main_name]))}
@@ -188,7 +148,7 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
     return examples, co_occurrence_examples
 
 
-def compute_ols_regression(features: pd.DataFrame, dependent_variable: pd.Series, confidence: float = .95,
+def compute_ols_regression(features: pd.DataFrame, dependent_variable: pd.Series,
                            regularization: Literal["ridge", "lasso"] | None = None, alpha: float = 1.0) -> pd.DataFrame:
     model = sm.OLS(dependent_variable, features)
 
@@ -204,14 +164,7 @@ def compute_ols_regression(features: pd.DataFrame, dependent_variable: pd.Series
 
     if summary:
         print(summary)
-
-        table_as_html = summary.tables[1].as_html()
-        df = pd.read_html(table_as_html, header=0, index_col=0)[0]
-        df = df[df["P>|t|"] <= (1 - confidence)]
-
-        print()
-        print()
-        print(f"Features whose coefficient is significantly different from zero ({len(df)}):")
+        df = pd.read_html(summary.tables[1].as_html(), header=0, index_col=0)[0]
     else:
         print("R^2:", RegressionResults(model, results.params).rsquared)
         df = pd.DataFrame(results.params, columns=["coef"], index=features.columns)
@@ -270,6 +223,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--iterations", type=int, default=10_000, help="Only applies to the SVM model.")
 
+    parser.add_argument("--manual-significance-test", action="store_true")
     parser.add_argument("--confidence", type=float, default=.95)
 
     parser.add_argument("--examples", choices=EXAMPLE_MODES, default="top")
@@ -279,6 +233,7 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
 
     assert args.max_data_count is None or not args.debug, "Cannot specify max data count in debug mode."
+    args.max_data_count = 1000 if args.debug else args.max_data_count
 
     args.dependent_variable_name = (args.dependent_variable_name
                                     or ("clip_score_diff" if args.model in REGRESSION_MODELS else "clip prediction"))
@@ -293,13 +248,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    max_data_count = 1000 if args.debug else args.max_data_count
-
     print(args)
 
     raw_features, features, dependent_variable = load_features(
         path=args.input_path, dependent_variable_name=args.dependent_variable_name,
-        max_data_count=max_data_count, feature_deny_list=args.feature_deny_list,
+        max_data_count=args.max_data_count, feature_deny_list=args.feature_deny_list,
         standardize_dependent_variable=args.model in REGRESSION_MODELS,
         standardize_binary_features=args.model in REGRESSION_MODELS,
         compute_neg_features=args.compute_neg_features, levin_return_mode=args.levin_return_mode,
@@ -309,21 +262,10 @@ def main() -> None:
         feature_correlation_keep_threshold=args.feature_correlation_keep_threshold, do_vif=args.do_vif,
         feature_min_non_zero_values=args.feature_min_non_zero_values)
 
-    confidence = args.confidence
-
     if args.model == "dominance-score":
         df = compute_dominance_score(features, dependent_variable)
-        # pinv = pinv_extended(features[df.index])[0]
-        # normalized_cov_params = pinv @ pinv.T
-        # results = LikelihoodModelResults(None, df.coef, normalized_cov_params=normalized_cov_params)
-        # keep = results.pvalues <= (1 - args.confidence)
-
-        # confidence_intervals = results.conf_int(alpha=(1 - args.confidence))
-        # df[f"[{(1 - confidence) / 2:.3f}"] = confidence_intervals[:, 0]
-        # df[f"{(confidence + (1 - confidence) / 2):.3f}]"] = confidence_intervals[:, 1]
-
     elif args.model == "ols":
-        df = compute_ols_regression(features, dependent_variable, confidence=confidence, alpha=args.alpha)
+        df = compute_ols_regression(features, dependent_variable, alpha=args.alpha)
     elif args.model == "ridge":
         df = compute_ridge_regression(features, dependent_variable, alpha=args.alpha)
     elif args.model == "svm":
@@ -332,6 +274,21 @@ def main() -> None:
         raise ValueError(f"Unknown model: {args.model} (should be in {MODELS}).")
 
     df = df.sort_values(by=["coef"], ascending=False)
+
+    confidence = args.confidence
+
+    if "P>|t|" not in df.columns:
+        pinv = pinv_extended(features[df.index])[0]
+        normalized_cov_params = pinv @ pinv.T
+        results = LikelihoodModelResults(None, df.coef, normalized_cov_params=normalized_cov_params)
+        df["std err"] = results.bse
+        df["t"] = results.tvalues
+        df["P>|t|"] = results.pvalues
+        confidence_intervals = results.conf_int(alpha=(1 - args.confidence))
+        df[f"[{(1 - confidence) / 2:.3f}"] = confidence_intervals[:, 0]
+        df[f"{(confidence + (1 - confidence) / 2):.3f}]"] = confidence_intervals[:, 1]
+
+        print(df.to_string())
 
     if args.examples != "disabled":
         if args.examples == "top":
@@ -345,7 +302,14 @@ def main() -> None:
          df["co-occurring word examples"]) = obtain_top_examples_and_co_occurrences(df.index, raw_features,
                                                                                     sample_size=sample_size)
 
+    df = df[df["P>|t|"] <= (1 - args.confidence)]
+    print()
+    print()
+    print(f"Features whose coefficient is significantly different from zero ({len(df)}):")
+
     print(df.to_string())
+
+    df.to_csv(f"data/output_{args.dependent_variable_name}.csv")
 
     if args.plot:
         top_k = 10
