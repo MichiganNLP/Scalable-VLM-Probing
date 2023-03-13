@@ -10,5 +10,5 @@
 
 module load python/3.10.4
 source venv/bin/activate
-#python main.py --dependent-variable-name pos_clip_score --no-neg-features --vif
-python main.py --dependent-variable-name neg_clip_score --vif
+#python main.py --dependent-variable-name pos_clip_score --no-neg-features --do-vif
+python main.py --dependent-variable-name neg_clip_score --do-vif
