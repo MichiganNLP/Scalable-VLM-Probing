@@ -7,10 +7,12 @@ from collections import Counter
 from typing import Any, Collection, Iterable, Literal, Sequence, Tuple
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import scipy
 import seaborn as sns
 import statsmodels.api as sm
+from scipy import stats
 from sklearn import svm
 from sklearn.ensemble import RandomForestRegressor
 from statsmodels.base.model import LikelihoodModelResults
@@ -21,7 +23,7 @@ from tqdm.auto import tqdm
 from features import VALID_LEVIN_RETURN_MODES, is_feature_binary, is_feature_multi_label, load_features
 
 CLASSIFICATION_MODELS = {"dominance-score", "sklearn-clf"}
-REGRESSION_MODELS = {"ols", "ridge", "lasso", "sklearn"}
+REGRESSION_MODELS = {"anova", "lasso", "ols", "ridge", "sklearn"}
 MODELS = CLASSIFICATION_MODELS | REGRESSION_MODELS
 
 EXAMPLE_MODES = ["top", "sample", "disabled"]
@@ -147,12 +149,12 @@ def compute_dominance_score(features: pd.DataFrame, dependent_variable: pd.Serie
 
     dominance_scores = {}
 
-    for column in features.columns:
-        feature = features[column]
+    for column_name in features.columns:
+        feature = features[column_name]
         if is_feature_binary(feature):
             pos_coverage = feature[dependent_variable].sum() / total_pos
             neg_coverage = feature[neg_labels].sum() / total_neg
-            dominance_scores[column] = pos_coverage / neg_coverage
+            dominance_scores[column_name] = pos_coverage / neg_coverage
 
     return pd.DataFrame(dominance_scores.values(), columns=["coef"], index=dominance_scores.keys())  # noqa
 
@@ -161,6 +163,62 @@ def compute_sklearn_clf(features: pd.DataFrame, dependent_variable: pd.Series) -
     clf = svm.LinearSVC(class_weight="balanced", max_iter=1_000_000)
     clf.fit(features, dependent_variable)
     return pd.DataFrame(clf.coef_, columns=["coef"], index=features.columns)
+
+
+def compute_anova(features: pd.DataFrame, dependent_variable: pd.Series, confidence: float = .95) -> pd.DataFrame:
+    assert len(features) == len(dependent_variable)
+
+    diff = {}
+    std_err = {}
+    t = {}
+    p = {}
+    lower_bound = {}
+    upper_bound = {}
+
+    for column_name in features.columns:
+        feature = features[column_name]
+        if is_feature_binary(feature):
+            feature = feature.astype(bool)
+
+            pos_group = dependent_variable[feature]
+            neg_group = dependent_variable[~feature]
+
+            t[column_name], p[column_name] = stats.ttest_ind(pos_group, neg_group, equal_var=False)
+
+            # The following code was adapted from `stats.ttest_ind`:
+
+            diff[column_name] = pos_group.mean() - neg_group.mean()
+
+            pos_group_var = pos_group.var(ddof=1)
+            neg_group_var = neg_group.var(ddof=1)
+
+            pos_group_size = len(pos_group)
+            neg_group_size = len(neg_group)
+
+            pos_group_vn = pos_group_var / pos_group_size
+            neg_group_vn = neg_group_var / neg_group_size
+
+            std_err[column_name] = np.sqrt(pos_group_vn + neg_group_vn)
+
+            with np.errstate(divide='ignore', invalid='ignore'):
+                df = (pos_group_vn + neg_group_vn) ** 2 / (pos_group_vn ** 2 / (pos_group_size - 1)
+                                                           + neg_group_vn ** 2 / (neg_group_size - 1))
+
+            # If df is undefined, variances are zero (assumes n1 > 0 & n2 > 0).
+            # Hence, it doesn't matter what df is as long as it's not NaN.
+            df = np.where(np.isnan(df), 1, df)
+
+            half_interval_size = stats.t.ppf(confidence + (1 - confidence) / 2, df) * std_err[column_name]
+            lower_bound[column_name] = diff[column_name] - half_interval_size
+            upper_bound[column_name] = diff[column_name] + half_interval_size
+
+    df = pd.DataFrame({"coef": diff.values(), "std err": std_err.values(), "t": t.values(), "P>|t|": p.values(),
+                       f"[{(1 - confidence) / 2:.3f}": lower_bound.values(),
+                       f"{(confidence + (1 - confidence) / 2):.3f}]": upper_bound.values()}, index=t.keys())  # noqa
+
+    print(df.to_string())
+
+    return df
 
 
 def parse_args() -> argparse.Namespace:
@@ -204,6 +262,8 @@ def parse_args() -> argparse.Namespace:
     assert args.compute_neg_features or not args.merge_original_and_replacement_features, \
         "Cannot merge original and replacement features if neg features are not computed."
 
+    args.do_standardization = args.model in {"lasso", "ols", "ridge"}
+
     return args
 
 
@@ -215,8 +275,8 @@ def main() -> None:
     raw_features, features, dependent_variable = load_features(
         path=args.input_path, dependent_variable_name=args.dependent_variable_name,
         max_data_count=args.max_data_count, feature_deny_list=args.feature_deny_list,
-        standardize_dependent_variable=args.model in REGRESSION_MODELS,
-        standardize_binary_features=args.model in REGRESSION_MODELS,
+        standardize_dependent_variable=args.do_standardization,
+        standardize_binary_features=args.do_standardization,
         compute_neg_features=args.compute_neg_features, levin_return_mode=args.levin_return_mode,
         compute_similarity_features=args.model in REGRESSION_MODELS,
         merge_original_and_replacement_features=args.merge_original_and_replacement_features,
@@ -233,6 +293,8 @@ def main() -> None:
         df = compute_dominance_score(features, dependent_variable)
     elif args.model == "sklearn-clf":
         df = compute_sklearn_clf(features, dependent_variable)
+    elif args.model == "anova":
+        df = compute_anova(features, dependent_variable)
     else:
         raise ValueError(f"Unknown model: {args.model} (should be in {MODELS}).")
 
