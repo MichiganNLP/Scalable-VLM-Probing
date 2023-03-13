@@ -379,8 +379,8 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         _compute_feature_for_each_word(df, "nb-synsets", _get_nb_synsets, compute_neg_features=compute_neg_features)
         print(" ✓")
 
-    if compute_similarity_features:
-        if "text-similarity" not in feature_deny_list and compute_neg_features:
+    if compute_similarity_features and compute_neg_features:
+        if "text-similarity" not in feature_deny_list:
             print("Computing the text similarity…")
 
             embedded_sentences = text_model.encode(df.sentence.array, show_progress_bar=True)
@@ -390,7 +390,7 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
             # We set the similarity to NaN for empty sentences:
             df.loc[[s == "" for s in df.neg_sentence], "text-similarity"] = float("nan")
 
-        if "word-similarity" not in feature_deny_list and compute_neg_features:
+        if "word-similarity" not in feature_deny_list:
             print("Computing the word similarity…")
 
             embedded_original_words = text_model.encode(df["word-original"].array, show_progress_bar=True)
@@ -398,21 +398,21 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
 
             df["word-similarity"] = util.pairwise_cos_sim(embedded_original_words, embedded_replacement_words)
 
-        if "wup-similarity" not in feature_deny_list and compute_neg_features:
+        if "wup-similarity" not in feature_deny_list:
             print("Computing the Wu-Palmer similarity…", end="")
             df["wup-similarity"] = df.apply(
                 lambda row: _compute_wup_similarity(row["word-original"], row["word-replacement"], row["neg-type"]),
                 axis=1)
             print(" ✓")
 
-        if "lch-similarity" not in feature_deny_list and compute_neg_features:
+        if "lch-similarity" not in feature_deny_list:
             print("Computing the Leacock-Chodorow similarity…", end="")
             df["lch-similarity"] = df.apply(
                 lambda row: _compute_lch_similarity(row["word-original"], row["word-replacement"], row["neg-type"]),
                 axis=1)
             print(" ✓")
 
-        if "path-similarity" not in feature_deny_list and compute_neg_features:
+        if "path-similarity" not in feature_deny_list:
             print("Computing the Path similarity…", end="")
             df["path-similarity"] = df.apply(
                 lambda row: _compute_path_similarity(row["word-original"], row["word-replacement"], row["neg-type"]),
