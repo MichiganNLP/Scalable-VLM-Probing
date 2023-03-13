@@ -612,7 +612,7 @@ def _transform_features_to_numbers(
 
 
 def _describe_features(features: pd.DataFrame, dependent_variable: pd.Series) -> None:
-    main_feature_names = [feature_name.split("_")[0] for feature_name in features.columns]
+    main_feature_names = [feature_name.split("_", maxsplit=1)[0] for feature_name in features.columns]
     print(f"Features size:", len(features.columns), "--", Counter(main_feature_names))
     print(f"Features shape:", features.shape)
 
