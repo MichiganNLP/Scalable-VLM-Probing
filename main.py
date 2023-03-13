@@ -110,7 +110,7 @@ def compute_ols_regression(features: pd.DataFrame, dependent_variable: pd.Series
 
     if regularization:
         alpha /= len(features)  # See https://stackoverflow.com/a/72260809/1165181
-        results = model.fit_regularized(L1_wt=0 if regularization == "ridge" else 1, alpha=alpha)
+        results = model.fit_regularized(L1_wt=int(regularization == "lasso"), alpha=alpha)
     else:
         results = model.fit()
 
