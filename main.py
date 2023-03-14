@@ -380,7 +380,7 @@ def main() -> None:
         binary_feature_names = [feature_name
                                 for feature_name in top_df.index[:2]
                                 if is_feature_binary(non_standardized_features[feature_name])]
-        binary_features = non_standardized_features[binary_feature_names]
+        binary_features = non_standardized_features[binary_feature_names].astype(int)
         non_standardized_dependent_variable = raw_features[args.dependent_variable_name]
         repeated_dependent_variable = pd.concat([non_standardized_dependent_variable] * len(binary_features.columns),
                                                 ignore_index=True)
