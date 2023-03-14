@@ -672,8 +672,10 @@ def is_feature_binary(feature: np.ndarray | pd.Series) -> bool:
 
 
 def is_feature_multi_label(feature: np.ndarray | pd.Series) -> bool:
-    return all(issubclass(type(x), Iterable) and not issubclass(type(x), str) for x in feature)
+    x = feature[0]  # We suppose the first one is representative to make it faster.
+    return issubclass(type(x), Iterable) and not issubclass(type(x), str)
 
 
 def is_feature_string(feature: np.ndarray | pd.Series) -> bool:
-    return all(issubclass(type(x), str) for x in feature)
+    x = feature[0]  # We suppose the first one is representative to make it faster.
+    return issubclass(type(x), str)

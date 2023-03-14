@@ -47,8 +47,7 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
     multi_label_features = {main_name
                             for name in feature_names
                             if ((main_name := name.split("_", maxsplit=1)[0]) in raw_features
-                                # We can just use a single value to infer the type:
-                                and is_feature_multi_label(raw_features.loc[raw_features.index[:1], main_name]))}
+                                and is_feature_multi_label(raw_features[main_name]))}
 
     examples = []
     co_occurrence_examples = []
