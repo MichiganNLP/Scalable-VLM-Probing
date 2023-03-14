@@ -479,22 +479,25 @@ class SelectMinNonZero(SelectorMixin, BaseEstimator):
 
 def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
                        standardize_binary_features: bool = True, feature_min_non_zero_values: int = 50) -> Any:
-    transformers = None
+    transformers = None  # `None` in this context means to ignore the feature. Note it's different from `[]`.
 
-    dtype = feature.dtype
     if is_feature_binary(feature):
-        transformers = [SelectMinNonZero(feature_min_non_zero_values)]
-    elif np.issubdtype(dtype, np.number):
+        transformers = []
+    elif np.issubdtype(feature.dtype, np.number):
         transformers = ([SimpleImputer()] if impute_missing_values else []) + [StandardScaler()]  # noqa
     elif is_feature_string(feature):
-        transformers = [OneHotEncoder(dtype=bool, sparse_output=not standardize_binary_features),
-                        SelectMinNonZero(feature_min_non_zero_values)]
+        transformers = [OneHotEncoder(dtype=bool, sparse_output=not standardize_binary_features)]
     elif is_feature_multi_label(feature):
-        transformers = [MultiLabelBinarizer(), SelectMinNonZero(feature_min_non_zero_values)]
+        transformers = [MultiLabelBinarizer()]
 
-    if standardize_binary_features and (is_feature_binary(feature) or is_feature_multi_label(feature)
-                                        or is_feature_string(feature)):
-        transformers.append(StandardScaler())
+    if transformers is not None:
+        transformers.append(VarianceThreshold())  # We remove the constant features.
+
+    if is_feature_binary(feature) or is_feature_multi_label(feature) or is_feature_string(feature):
+        transformers.append(SelectMinNonZero(feature_min_non_zero_values))
+
+        if standardize_binary_features:
+            transformers.append(StandardScaler())
 
     return transformers
 
@@ -503,8 +506,7 @@ def _transform_features_to_numbers(
         df: pd.DataFrame, dependent_variable_name: str, standardize_dependent_variable: bool = True,
         standardize_binary_features: bool = True, feature_min_non_zero_values: int = 50,
         compute_neg_features: bool = True, merge_original_and_replacement_features: bool = True,
-        remove_correlated_features: bool = True, feature_correlation_keep_threshold: float = .8, do_vif: bool = False,
-        verbose: bool = True) -> Tuple[pd.DataFrame, pd.Series]:
+        add_constant_feature: bool = False, verbose: bool = True) -> Tuple[pd.DataFrame, pd.Series]:
     if not standardize_dependent_variable:
         dependent_variable = df.pop(dependent_variable_name)
 
@@ -519,6 +521,17 @@ def _transform_features_to_numbers(
         if standardize_dependent_variable:
             feature_count -= 1
         print("Number of features before the transformation:", feature_count)
+
+    # We have to manually remove the multi-label constant features because otherwise it fails in `VarianceThreshold`
+    # if used in the transformer mapper as some binarized multi-label features may have no sub-features left.
+    # We can't use `VarianceThreshold` directly here because it only supports numerical features.
+    # We don't check for all types of features here because it's a bit complicated to do it in a generic way.
+    if empty_multi_label_feature_names := [c
+                                           for c in df
+                                           if (is_feature_multi_label(df[c])
+                                               and (df[c].transform(tuple) == tuple(df[c][0])).all())]:
+        print("Multi-label features ignored because they are constant:", empty_multi_label_feature_names)
+        df = df.drop(columns=empty_multi_label_feature_names)
 
     transformers: MutableSequence[Tuple] = []
 
@@ -571,43 +584,10 @@ def _transform_features_to_numbers(
         new_df = new_df.drop(columns_to_remove, axis="columns")
         new_df = pd.concat((new_df, pd.DataFrame.from_dict(new_columns)), axis="columns")
 
+    if add_constant_feature:
+        new_df = sm.add_constant(new_df)
+
     print("Number of features after the transformation:", len(new_df.columns))
-
-    new_df2 = VarianceThreshold().set_output(transform="pandas").fit_transform(new_df)
-    if len(new_df.columns) != len(new_df2.columns):
-        print("Removed", len(new_df.columns) - len(new_df2.columns), "constant features:",
-              set(new_df.columns) - set(new_df2.columns))
-        new_df = new_df2
-        print("Number of features after the removal of constant features:", len(new_df.columns))
-
-    new_df = sm.add_constant(new_df)
-
-    if remove_correlated_features:
-        print("Computing the feature correlation matrix…", end="")
-        # TODO: a chi-squared test would be better for binary data. But it should be done before standardization.
-        # From: https://stackoverflow.com/a/52509954/1165181
-        corr_matrix = new_df.corr().abs()
-        print(" ✓")
-        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-        to_drop = [column for column in upper.columns if any(upper[column] >= feature_correlation_keep_threshold)]
-        print("The following", len(to_drop), "features are correlated and will be removed:", to_drop)
-        new_df.drop(to_drop, axis="columns", inplace=True)
-        print("Number of features after the removal of correlated features:", len(new_df.columns))
-
-        if do_vif:
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", message="divide by zero encountered in scalar divide.*")
-                with trange(len(new_df.columns), desc="Removing correlated features") as progress_bar:
-                    for _ in progress_bar:
-                        c_max_vif, max_vif = max(((c, variance_inflation_factor(new_df.values, i))
-                                                  for i, c in enumerate(new_df.columns)),
-                                                 key=lambda t: t[1])
-                        if max_vif < 5:
-                            break
-                        new_df = new_df.drop(c_max_vif, axis="columns")
-                        progress_bar.set_postfix_str(f"Removed {c_max_vif} (VIF={max_vif:.2f})")
-            print(f"Final largest VIF ({max_vif}) comes from {c_max_vif}.")
-            print("Number of features after the removal of correlated features based on VIF:", len(new_df.columns))
 
     return new_df, dependent_variable  # noqa
 
@@ -626,9 +606,8 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
                               compute_neg_features: bool = True, levin_return_mode: LevinReturnMode = "all",
                               compute_similarity_features: bool = True,
                               merge_original_and_replacement_features: bool = True,
-                              feature_min_non_zero_values: int = 50, standardize_dependent_variable: bool = True,
-                              standardize_binary_features: bool = True, remove_correlated_features: bool = True,
-                              feature_correlation_keep_threshold: float = .8, do_vif: bool = False,
+                              add_constant_feature: bool = False, feature_min_non_zero_values: int = 50,
+                              standardize_dependent_variable: bool = True, standardize_binary_features: bool = True,
                               verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     raw_features = _compute_features(clip_results, feature_deny_list=feature_deny_list,
                                      max_data_count=max_data_count, compute_neg_features=compute_neg_features,
@@ -639,11 +618,7 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
         standardize_binary_features=standardize_binary_features,
         feature_min_non_zero_values=feature_min_non_zero_values, compute_neg_features=compute_neg_features,
         merge_original_and_replacement_features=merge_original_and_replacement_features,
-        remove_correlated_features=remove_correlated_features,
-        feature_correlation_keep_threshold=feature_correlation_keep_threshold, do_vif=do_vif)
-
-    if verbose:
-        _describe_features(features, dependent_variable)
+        add_constant_feature=add_constant_feature, verbose=verbose)
 
     return raw_features, features, dependent_variable
 
@@ -652,19 +627,51 @@ def load_features(path: str, dependent_variable_name: str, max_data_count: int |
                   feature_deny_list: Collection[str] = frozenset(), standardize_dependent_variable: bool = True,
                   standardize_binary_features: bool = True, compute_neg_features: bool = True,
                   levin_return_mode: LevinReturnMode = "all", compute_similarity_features: bool = True,
-                  merge_original_and_replacement_features: bool = True, remove_correlated_features: bool = True,
-                  feature_correlation_keep_threshold: float = .8, do_vif: bool = False,
-                  feature_min_non_zero_values: int = 50) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
+                  merge_original_and_replacement_features: bool = True, add_constant_feature: bool = False,
+                  remove_correlated_features: bool = True, feature_correlation_keep_threshold: float = .8,
+                  do_vif: bool = False, feature_min_non_zero_values: int = 50,
+                  verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     clip_results = _load_clip_results(path)
-    return _compute_numeric_features(
+    raw_features, features, dependent_variable = _compute_numeric_features(
         clip_results, dependent_variable_name, max_data_count=max_data_count, feature_deny_list=feature_deny_list,
         standardize_dependent_variable=standardize_dependent_variable,
         standardize_binary_features=standardize_binary_features, compute_neg_features=compute_neg_features,
         levin_return_mode=levin_return_mode, compute_similarity_features=compute_similarity_features,
         merge_original_and_replacement_features=merge_original_and_replacement_features,
-        remove_correlated_features=remove_correlated_features,
-        feature_correlation_keep_threshold=feature_correlation_keep_threshold, do_vif=do_vif,
-        feature_min_non_zero_values=feature_min_non_zero_values)
+        add_constant_feature=add_constant_feature, feature_min_non_zero_values=feature_min_non_zero_values,
+        verbose=verbose)
+
+    if remove_correlated_features:
+        print("Computing the feature correlation matrix…", end="")
+        # TODO: a chi-squared test would be better for binary data. But it should be done before standardization.
+        # From: https://stackoverflow.com/a/52509954/1165181
+        corr_matrix = features.corr().abs()
+        print(" ✓")
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        to_drop = [column for column in upper.columns if any(upper[column] >= feature_correlation_keep_threshold)]
+        print("The following", len(to_drop), "features are correlated and will be removed:", to_drop)
+        features.drop(to_drop, axis="columns", inplace=True)
+        print("Number of features after the removal of correlated features:", len(features.columns))
+
+        if do_vif:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="divide by zero encountered in scalar divide.*")
+                with trange(len(features.columns), desc="Removing correlated features") as progress_bar:
+                    for _ in progress_bar:
+                        c_max_vif, max_vif = max(((c, variance_inflation_factor(new_df.values, i))
+                                                  for i, c in enumerate(new_df.columns)),
+                                                 key=lambda t: t[1])
+                        if max_vif < 5:
+                            break
+                        new_df = new_df.drop(c_max_vif, axis="columns")
+                        progress_bar.set_postfix_str(f"Removed {c_max_vif} (VIF={max_vif:.2f})")
+            print(f"Final largest VIF ({max_vif}) comes from {c_max_vif}.")
+            print("Number of features after the removal of correlated features based on VIF:", len(new_df.columns))
+
+    if verbose:
+        _describe_features(features, dependent_variable)
+
+    return raw_features, features, dependent_variable
 
 
 def is_feature_binary(feature: np.ndarray | pd.Series) -> bool:

@@ -250,8 +250,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-neg-features", dest="compute_neg_features", action="store_false")
     parser.add_argument("--levin-return-mode", choices=VALID_LEVIN_RETURN_MODES, default="semantic_fine_grained")
     parser.add_argument("--merge-original-and-replacement-features", action="store_true")
-    parser.add_argument("--no-remove-correlated-features", dest="remove_correlated_features", action="store_false")
-    parser.add_argument("---feature-correlation-keep-threshold", type=float, default=.8)
+    parser.add_argument("--add-constant-feature", action="store_true")
+    parser.add_argument("--remove-correlated-features", action="store_true")
+    parser.add_argument("--feature-correlation-keep-threshold", type=float, default=.8)
     parser.add_argument("--do-vif", action="store_true")
 
     parser.add_argument("--alpha", type=float, default=1, help="Only applies to the ridge regression model.")
@@ -293,6 +294,7 @@ def main() -> None:
         standardize_binary_features=args.do_standardization,
         compute_neg_features=args.compute_neg_features, levin_return_mode=args.levin_return_mode,
         compute_similarity_features=args.model in REGRESSION_MODELS,
+        add_constant_feature=args.add_constant_feature,
         merge_original_and_replacement_features=args.merge_original_and_replacement_features,
         remove_correlated_features=args.remove_correlated_features,
         feature_correlation_keep_threshold=args.feature_correlation_keep_threshold, do_vif=args.do_vif,
