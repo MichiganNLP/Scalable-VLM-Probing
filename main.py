@@ -370,17 +370,17 @@ def main() -> None:
         plt.show()
 
         if args.do_standardization:  # Hack to undo the standardization:
-            non_standardized_features = features.copy()
-            non_standardized_features[features == features.min()] = 0
-            non_standardized_features[features == features.max()] = 1
-            non_standardized_features = non_standardized_features.astype(int)
+            non_standardized_features_as_int = features.copy()
+            non_standardized_features_as_int[features == features.min()] = 0
+            non_standardized_features_as_int[features == features.max()] = 1
+            non_standardized_features_as_int = non_standardized_features_as_int.astype(int)
         else:
-            non_standardized_features = features
+            non_standardized_features_as_int = features.astype(int)
 
         binary_feature_names = [feature_name
                                 for feature_name in top_df.index[:2]
-                                if is_feature_binary(non_standardized_features[feature_name])]
-        binary_features = non_standardized_features[binary_feature_names].astype(int)
+                                if is_feature_binary(non_standardized_features_as_int[feature_name])]
+        binary_features = non_standardized_features_as_int[binary_feature_names]
         non_standardized_dependent_variable = raw_features[args.dependent_variable_name]
         repeated_dependent_variable = pd.concat([non_standardized_dependent_variable] * len(binary_features.columns),
                                                 ignore_index=True)
