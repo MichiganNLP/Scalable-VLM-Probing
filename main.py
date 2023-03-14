@@ -369,16 +369,17 @@ def main() -> None:
                     palette=[good_color] * top_k + [bad_color] * top_k)
         plt.show()
 
-        if args.do_standardization:  # Hack to undo the standardization:
-            non_standardized_features_as_int = features.copy()
+        non_standardized_features_as_int = features.copy()
+        if args.do_standardization:
+            # Hack to undo the standardization:
             non_standardized_features_as_int[features == features.min()] = 0
             non_standardized_features_as_int[features == features.max()] = 1
-            non_standardized_features_as_int = non_standardized_features_as_int.astype(int)
         else:
-            non_standardized_features_as_int = features.astype(int)
+            non_standardized_features_as_int = features
+        non_standardized_features_as_int = non_standardized_features_as_int.astype(int)
 
         binary_feature_names = [feature_name
-                                for feature_name in top_df.index[:2]
+                                for feature_name in top_df.index
                                 if is_feature_binary(non_standardized_features_as_int[feature_name])]
         binary_features = non_standardized_features_as_int[binary_feature_names]
         non_standardized_dependent_variable = raw_features[args.dependent_variable_name]
