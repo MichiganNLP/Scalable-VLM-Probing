@@ -23,7 +23,7 @@ from tqdm.auto import tqdm
 from features import VALID_LEVIN_RETURN_MODES, is_feature_binary, is_feature_multi_label, load_features
 
 CLASSIFICATION_MODELS = {"dominance-score", "sklearn-clf"}
-REGRESSION_MODELS = {"anova", "lasso", "ols", "ridge", "sklearn"}
+REGRESSION_MODELS = {"mean-diff-and-corr", "lasso", "ols", "ridge", "sklearn"}
 MODELS = CLASSIFICATION_MODELS | REGRESSION_MODELS
 
 EXAMPLE_MODES = ["top", "sample", "disabled"]
@@ -165,29 +165,33 @@ def compute_sklearn_clf(features: pd.DataFrame, dependent_variable: pd.Series) -
     return pd.DataFrame(clf.coef_, columns=["coef"], index=features.columns)
 
 
-def compute_anova(features: pd.DataFrame, dependent_variable: pd.Series, confidence: float = .95) -> pd.DataFrame:
+def compute_mean_diff_and_corr(features: pd.DataFrame, dependent_variable: pd.Series,
+                               confidence: float = .95) -> pd.DataFrame:
     assert len(features) == len(dependent_variable)
 
-    diff = {}
+    coef_type = {}
+    score = {}
     std_err = {}
     t = {}
     p = {}
     lower_bound = {}
     upper_bound = {}
 
-    for column_name in features.columns:
-        feature = features[column_name]
+    for feature_name in tqdm(features.columns, desc="Computing mean diff and corr"):
+        feature = features[feature_name]
         if is_feature_binary(feature):
+            coef_type[feature_name] = "diff"
+
             feature = feature.astype(bool)
 
             pos_group = dependent_variable[feature]
             neg_group = dependent_variable[~feature]
 
-            t[column_name], p[column_name] = stats.ttest_ind(pos_group, neg_group, equal_var=False)
+            t[feature_name], p[feature_name] = stats.ttest_ind(pos_group, neg_group, equal_var=False)
 
             # The following code was adapted from `stats.ttest_ind`:
 
-            diff[column_name] = pos_group.mean() - neg_group.mean()
+            score[feature_name] = pos_group.mean() - neg_group.mean()
 
             pos_group_var = pos_group.var(ddof=1)
             neg_group_var = neg_group.var(ddof=1)
@@ -198,9 +202,9 @@ def compute_anova(features: pd.DataFrame, dependent_variable: pd.Series, confide
             pos_group_vn = pos_group_var / pos_group_size
             neg_group_vn = neg_group_var / neg_group_size
 
-            std_err[column_name] = np.sqrt(pos_group_vn + neg_group_vn)
+            std_err[feature_name] = np.sqrt(pos_group_vn + neg_group_vn)
 
-            with np.errstate(divide='ignore', invalid='ignore'):
+            with np.errstate(divide="ignore", invalid="ignore"):
                 df = (pos_group_vn + neg_group_vn) ** 2 / (pos_group_vn ** 2 / (pos_group_size - 1)
                                                            + neg_group_vn ** 2 / (neg_group_size - 1))
 
@@ -208,12 +212,23 @@ def compute_anova(features: pd.DataFrame, dependent_variable: pd.Series, confide
             # Hence, it doesn't matter what df is as long as it's not NaN.
             df = np.where(np.isnan(df), 1, df)
 
-            half_interval_size = stats.t.ppf(confidence + (1 - confidence) / 2, df) * std_err[column_name]
-            lower_bound[column_name] = diff[column_name] - half_interval_size
-            upper_bound[column_name] = diff[column_name] + half_interval_size
+            half_interval_size = stats.t.ppf(confidence + (1 - confidence) / 2, df) * std_err[feature_name]
 
-    df = pd.DataFrame({"coef": diff.values(), "std err": std_err.values(), "t": t.values(), "P>|t|": p.values(),
-                       f"[{(1 - confidence) / 2:.3f}": lower_bound.values(),
+            lower_bound[feature_name] = score[feature_name] - half_interval_size
+            upper_bound[feature_name] = score[feature_name] + half_interval_size
+        elif np.issubdtype(feature.dtype, np.number):
+            coef_type[feature_name] = "corr"
+
+            corr_result = stats.pearsonr(feature, dependent_variable)
+            score[feature_name] = corr_result.statistic
+            p[feature_name] = corr_result.pvalue
+            lower_bound[feature_name], upper_bound[feature_name] = corr_result.confidence_interval(confidence)
+
+            std_err[feature_name] = np.sqrt((1 - score[feature_name] ** 2) / (len(feature) - 2))
+            t[feature_name] = score[feature_name] / std_err[feature_name]
+
+    df = pd.DataFrame({"coef-type": coef_type.values(), "coef": score.values(), "std err": std_err.values(),
+                       "t": t.values(), "P>|t|": p.values(), f"[{(1 - confidence) / 2:.3f}": lower_bound.values(),
                        f"{(confidence + (1 - confidence) / 2):.3f}]": upper_bound.values()}, index=t.keys())  # noqa
 
     print(df.to_string())
@@ -293,8 +308,8 @@ def main() -> None:
         df = compute_dominance_score(features, dependent_variable)
     elif args.model == "sklearn-clf":
         df = compute_sklearn_clf(features, dependent_variable)
-    elif args.model == "anova":
-        df = compute_anova(features, dependent_variable)
+    elif args.model == "mean-diff-and-corr":
+        df = compute_mean_diff_and_corr(features, dependent_variable)
     else:
         raise ValueError(f"Unknown model: {args.model} (should be in {MODELS}).")
 
