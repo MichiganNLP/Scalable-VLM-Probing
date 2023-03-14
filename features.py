@@ -98,9 +98,7 @@ def _load_clip_results(path: str) -> pd.DataFrame:
     df.neg_type = df.neg_type.str.get(0)
     assert df.neg_type.isin(VALID_NEG_TYPES).all()
 
-    # df["clip prediction"] = df["clip prediction"] == "pos"
-    df["clip prediction"] = df["pos_clip_score"] >= df["pos_clip_score"].mean()
-    # df["clip prediction"] = df["neg_clip_score"] >= df["neg_clip_score"].mean()
+    df["clip prediction"] = df["clip prediction"] == "pos"
 
     return df
 
