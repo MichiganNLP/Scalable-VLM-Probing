@@ -502,15 +502,16 @@ def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
 def _transform_features_to_numbers(
         df: pd.DataFrame, dependent_variable_name: str, standardize_dependent_variable: bool = True,
         standardize_binary_features: bool = True, feature_min_non_zero_values: int = 50,
-        merge_original_and_replacement_features: bool = True, remove_correlated_features: bool = True,
-        feature_correlation_keep_threshold: float = .8, do_vif: bool = False,
+        compute_neg_features: bool = True, merge_original_and_replacement_features: bool = True,
+        remove_correlated_features: bool = True, feature_correlation_keep_threshold: float = .8, do_vif: bool = False,
         verbose: bool = True) -> Tuple[pd.DataFrame, pd.Series]:
     if not standardize_dependent_variable:
         dependent_variable = df.pop(dependent_variable_name)
 
     columns_to_drop = (list({"sentence", "neg_sentence", "neg-type", "pos_triplet", "neg_triplet", "clip prediction",
-                             "clip_score_diff", "pos_clip_score", "neg_clip_score"} - {dependent_variable_name})
-                       + [c for c in df.columns if "-common-" in c] + [c for c in df.columns if c.startswith("word")])
+                             "clip_score_diff", "pos_clip_score", "neg_clip_score"} - {dependent_variable_name}))
+    if compute_neg_features:
+        columns_to_drop += [c for c in df.columns if "-common-" in c]  # These don't make sense for the negatives.
     df = df.drop(columns=list(columns_to_drop))
 
     if verbose:
@@ -636,7 +637,7 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
     features, dependent_variable = _transform_features_to_numbers(
         raw_features, dependent_variable_name, standardize_dependent_variable=standardize_dependent_variable,
         standardize_binary_features=standardize_binary_features,
-        feature_min_non_zero_values=feature_min_non_zero_values,
+        feature_min_non_zero_values=feature_min_non_zero_values, compute_neg_features=compute_neg_features,
         merge_original_and_replacement_features=merge_original_and_replacement_features,
         remove_correlated_features=remove_correlated_features,
         feature_correlation_keep_threshold=feature_correlation_keep_threshold, do_vif=do_vif)
