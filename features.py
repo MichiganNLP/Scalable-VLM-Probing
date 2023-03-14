@@ -505,6 +505,8 @@ def _transform_features_to_numbers(
         standardize_binary_features: bool = True, feature_min_non_zero_values: int = 50,
         compute_neg_features: bool = True, merge_original_and_replacement_features: bool = True,
         add_constant_feature: bool = False, verbose: bool = True) -> Tuple[pd.DataFrame, pd.Series]:
+    df = df.copy()
+
     if not standardize_dependent_variable:
         dependent_variable = df.pop(dependent_variable_name)
 
