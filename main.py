@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import itertools
 from collections import Counter
 from typing import Any, Collection, Iterable, Literal, Sequence, Tuple
 
@@ -88,11 +87,11 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
                     co_occurrence_words = (w for word_iter in lists_of_words_without_label for w in word_iter)
                 else:
                     words = rows_with_label[f"word-{word_type}"]
-                    other_word_type = next(iter({"original", "replacement"} - {word_type}))
-                    co_occurrence_words = itertools.chain((w for w in rows_with_label[f"word-{other_word_type}"]),
-                                                          (w
-                                                           for word_iter in rows_with_label[f"words-common"]
-                                                           for w in word_iter))
+                    other_word_types = {"common-0", "common-1", "common-2", "original", "replacement"} - {word_type}
+                    co_occurrence_words = (w  # FIXME: "replacement" shouldn't co-occur w "original" words. 2 cols?
+                                           for other_word_type in other_word_types
+                                           if f"word-{other_word_type}" in rows_with_label.columns
+                                           for w in rows_with_label[f"word-{other_word_type}"])
 
                 examples_str = ", ".join(f"{w} ({freq})" for w, freq in Counter(words).most_common(max_word_count))
                 co_occurrence_example_str = ", ".join(
