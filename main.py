@@ -55,7 +55,10 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
     for feature_name in tqdm(feature_names, desc="Computing examples and co-occurrences"):
         underscore_split = feature_name.split("_", maxsplit=1)
         if (main_feature_name := underscore_split[0]) in multi_label_features:
-            label = underscore_split[1]
+            if len(underscore_split) > 1:
+                label = underscore_split[1]
+            else:  # This can happen when only one label was kept from a multi-label feature.
+                label = raw_features[main_feature_name].iloc[0]
 
             main_feature_name_prefix, word_type = main_feature_name.split("-", maxsplit=1)
             if word_type in {"common", "common-0", "common-1", "common-2", "original", "replacement"}:
