@@ -356,8 +356,11 @@ def main() -> None:
             raise ValueError(f"Unknown examples mode: {args.examples} (should be in {EXAMPLE_MODES}).")
 
         (df["examples"], df["co-occurring word examples common to both tuples"],
-         df["co-occurring word examples from only one tuple"]) = obtain_top_examples_and_co_occurrences(
+         non_common_co_occurrence_examples) = obtain_top_examples_and_co_occurrences(
             df.index, raw_features, sample_size=sample_size)
+
+        if args.compute_neg_features:
+            df["co-occurring word examples from only one tuple"] = non_common_co_occurrence_examples
 
     df = df[df["P>|t|"] <= (1 - args.confidence)]
     print()
