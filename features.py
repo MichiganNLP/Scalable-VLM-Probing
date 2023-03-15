@@ -13,6 +13,7 @@ import pandas as pd
 import statsmodels.api as sm
 from nltk.corpus import wordnet as wn
 from nltk.stem import PorterStemmer, WordNetLemmatizer
+from pandas.core.dtypes.inference import is_float, is_bool
 from sentence_transformers import SentenceTransformer, util
 from sklearn.base import BaseEstimator
 from sklearn.feature_selection import SelectorMixin, VarianceThreshold
@@ -36,6 +37,7 @@ VALID_LEVIN_RETURN_MODES = get_args(LevinReturnMode)
 PATH_LEVIN_VERBS = "data/levin_verbs.txt"
 PATH_LEVIN_SEMANTIC_BROAD = "data/levin_semantic_broad.json"
 PATH_LIWC = "data/LIWC.2015.all.txt"
+PATH_GENERALINQ = "data/inquireraugmented.xls"
 PATH_CONCRETENESS = "data/concreteness.txt"
 PATH_WORD_FREQUENCIES = "data/words_counter_LAION.json"
 
@@ -175,10 +177,24 @@ def _parse_levin_file(path: str = PATH_LEVIN_VERBS, path_semantic_broad: str = P
     else:
         raise ValueError(f"Invalid return mode: {return_mode}")
 
+def _parse_generalinq_file():
+    data = pd.read_excel(PATH_GENERALINQ, index_col=0)
+    classes = list(data.columns)
+    dict_general = {}
+    for class_name in classes[1:-2]:
+        words = [word.lower() for word in data[class_name][1:].index if not is_float(data[class_name][word]) and not is_bool(word)]
+        for word in words:
+            if word not in dict_general:
+                dict_general[word] = []
+            dict_general[word].append(class_name)
+    print(f"Total # of General Inquirer classes:{len(dict_general.keys())}")
+    return dict_general
 
 def _get_levin_category(word: str, dict_levin: Mapping[str, Collection[str]], pos: Pos) -> Collection[str]:
     return dict_levin.get(word, []) if pos == "v" else []
 
+def _get_generalinquirel_category(word: str, dict_general: Mapping[str, Collection[str]]) -> Collection[str]:
+    return dict_general.get(word, [])
 
 def _get_nb_synsets(word: str, pos: Pos) -> int:  # noqa
     # We don't use the POS information because we're using this as a proxy of ambiguity.
@@ -351,6 +367,11 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
     if "LIWC" not in feature_deny_list:
         dict_liwc = _parse_liwc_file()
         _compute_feature_for_each_word(df, "LIWC", lambda w, _: _get_liwc_category(w, dict_liwc),
+                                       compute_neg_features=compute_neg_features)
+
+    if "GeneralINQ" not in feature_deny_list:
+        dict_general = _parse_generalinq_file()
+        _compute_feature_for_each_word(df, "GeneralINQ", lambda w, _: _get_generalinquirel_category(w, dict_general),
                                        compute_neg_features=compute_neg_features)
 
     if "hypernym" not in feature_deny_list:
