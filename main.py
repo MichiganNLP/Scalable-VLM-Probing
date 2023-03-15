@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 from collections import Counter
 from typing import Any, Collection, Iterable, Literal, Sequence, Tuple
 
@@ -28,7 +29,6 @@ MODELS = CLASSIFICATION_MODELS | REGRESSION_MODELS
 
 EXAMPLE_MODES = ["top", "sample", "disabled"]
 
-
 pd.options.display.float_format = "{:,.3f}".format
 
 
@@ -41,9 +41,9 @@ def _value_contains_label(v: Any, label: str) -> bool:
         raise ValueError(f"Unexpected value type: {type(v)}")
 
 
-def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_features: pd.DataFrame,
-                                           max_word_count: int = 5,
-                                           sample_size: int | None = None) -> Tuple[Sequence[str], Sequence[str]]:
+def obtain_top_examples_and_co_occurrences(
+        feature_names: Iterable[str], raw_features: pd.DataFrame, max_word_count: int = 5,
+        sample_size: int | None = None) -> Tuple[Sequence[str], Sequence[str], Sequence[str]]:
     multi_label_features = {main_name
                             for name in feature_names
                             if ((main_name := name.split("_", maxsplit=1)[0]) in raw_features
@@ -51,7 +51,8 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
                                      or is_feature_string(raw_features[main_name])))}
 
     examples = []
-    co_occurrence_examples = []
+    common_co_occurrence_examples = []
+    non_common_co_occurrence_examples = []
 
     for feature_name in tqdm(feature_names, desc="Computing examples and co-occurrences"):
         underscore_split = feature_name.split("_", maxsplit=1)
@@ -84,29 +85,39 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
                                      if not _value_contains_label(row[f"{main_feature_name_prefix}-common-{i}"],
                                                                   label)], axis=1)
                     # We could also use `lists_of_words_without_label.explode()`, but this is likely faster:
-                    co_occurrence_words = (w for word_iter in lists_of_words_without_label for w in word_iter)
+                    common_co_occurrence_words = (w for word_iter in lists_of_words_without_label for w in word_iter)
+
+                    non_common_co_occurrence_words = itertools.chain(rows_with_label["word-original"],
+                                                                     rows_with_label["word-replacement"])
                 else:
                     words = rows_with_label[f"word-{word_type}"]
-                    other_word_types = {"common-0", "common-1", "common-2", "original", "replacement"} - {word_type}
-                    co_occurrence_words = (w  # FIXME: "replacement" shouldn't co-occur w "original" words. 2 cols?
-                                           for other_word_type in other_word_types
-                                           if f"word-{other_word_type}" in rows_with_label.columns
-                                           for w in rows_with_label[f"word-{other_word_type}"])
+                    common_co_occurrence_words = (w
+                                                  for other_word_type in
+                                                  {"common-0", "common-1", "common-2"} - {word_type}
+                                                  for w in rows_with_label.get(f"words-{other_word_type}", []))
+                    non_common_co_occurrence_words = (w
+                                                      for other_word_type in {"original", "replacement"} - {word_type}
+                                                      for w in rows_with_label.get(f"word-{other_word_type}", []))
 
                 examples_str = ", ".join(f"{w} ({freq})" for w, freq in Counter(words).most_common(max_word_count))
-                co_occurrence_example_str = ", ".join(
-                    f"{w} ({freq})" for w, freq in Counter(co_occurrence_words).most_common(max_word_count))
+                common_co_occurrence_example_str = ", ".join(
+                    f"{w} ({freq})" for w, freq in Counter(common_co_occurrence_words).most_common(max_word_count))
+                non_common_co_occurrence_example_str = ", ".join(
+                    f"{w} ({freq})" for w, freq in Counter(non_common_co_occurrence_words).most_common(max_word_count))
             else:
                 examples_str = ""
-                co_occurrence_example_str = ""
+                common_co_occurrence_example_str = ""
+                non_common_co_occurrence_example_str = ""
         else:
             examples_str = ""
-            co_occurrence_example_str = ""
+            common_co_occurrence_example_str = ""
+            non_common_co_occurrence_example_str = ""
 
         examples.append(examples_str)
-        co_occurrence_examples.append(co_occurrence_example_str)
+        common_co_occurrence_examples.append(common_co_occurrence_example_str)
+        non_common_co_occurrence_examples.append(non_common_co_occurrence_example_str)
 
-    return examples, co_occurrence_examples
+    return examples, common_co_occurrence_examples, non_common_co_occurrence_examples
 
 
 def compute_ols_regression(features: pd.DataFrame, dependent_variable: pd.Series,
@@ -343,9 +354,9 @@ def main() -> None:
         else:
             raise ValueError(f"Unknown examples mode: {args.examples} (should be in {EXAMPLE_MODES}).")
 
-        (df["examples"],
-         df["co-occurring word examples"]) = obtain_top_examples_and_co_occurrences(df.index, raw_features,
-                                                                                    sample_size=sample_size)
+        (df["examples"], df["co-occurring word examples common to both tuples"],
+         df["co-occurring word examples from only one tuple"]) = obtain_top_examples_and_co_occurrences(
+            df.index, raw_features, sample_size=sample_size)
 
     df = df[df["P>|t|"] <= (1 - args.confidence)]
     print()
