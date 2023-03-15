@@ -460,8 +460,9 @@ def _fix_column_names(df: pd.DataFrame, mapper: DataFrameMapper) -> pd.DataFrame
 
 
 class SelectMinNonZero(SelectorMixin, BaseEstimator):
-    def __init__(self, feature_min_non_zero_values: int = 50) -> None:
+    def __init__(self, feature_min_non_zero_values: int = 50, leave_at_least_one: bool = True) -> None:
         self.feature_min_non_zero_values = feature_min_non_zero_values
+        self.leave_at_least_one = leave_at_least_one
 
     def fit(self, X: np.ndarray, y: np.ndarray | None = None) -> SelectMinNonZero:  # noqa
         assert not np.issubdtype(X.dtype, np.floating)
@@ -472,7 +473,15 @@ class SelectMinNonZero(SelectorMixin, BaseEstimator):
 
     def _get_support_mask(self) -> np.ndarray:
         check_is_fitted(self)
-        return self.non_zero_counts_ >= self.feature_min_non_zero_values  # noqa
+        mask = self.non_zero_counts_ >= self.feature_min_non_zero_values
+
+        if self.leave_at_least_one and not mask.any():
+            # We do this because, with sklearn-pandas, when we use a `MultiLabelBinarizer` (because they are
+            # transformed one by one), there may be no features left afterward and the next transformers in the
+            # pipeline may fail for that multi-label feature.
+            mask[np.argmax(self.non_zero_counts_)] = True
+
+        return mask
 
 
 def _infer_transformer(feature: np.ndarray | pd.Series, impute_missing_values: bool = True,
