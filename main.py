@@ -87,8 +87,8 @@ def obtain_top_examples_and_co_occurrences(
                     # We could also use `lists_of_words_without_label.explode()`, but this is likely faster:
                     common_co_occurrence_words = (w for word_iter in lists_of_words_without_label for w in word_iter)
 
-                    non_common_co_occurrence_words = itertools.chain(rows_with_label["word-original"],
-                                                                     rows_with_label["word-replacement"])
+                    non_common_co_occurrence_words = itertools.chain(rows_with_label.get("word-original", []),
+                                                                     rows_with_label.get("word-replacement", []))
                 else:
                     word_feature_name_prefix = "word" + ("s" if word_type.startswith("common-") else "")
                     words = rows_with_label[f"{word_feature_name_prefix}-{word_type}"]
