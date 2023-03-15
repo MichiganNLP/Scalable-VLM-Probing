@@ -475,7 +475,7 @@ class SelectMinNonZero(SelectorMixin, BaseEstimator):
         return self.non_zero_counts_ >= self.feature_min_non_zero_values  # noqa
 
 
-def _infer_transformer(feature: np.ndarray, impute_missing_values: bool = True,
+def _infer_transformer(feature: np.ndarray | pd.Series, impute_missing_values: bool = True,
                        standardize_binary_features: bool = True, feature_min_non_zero_values: int = 50) -> Any:
     transformers = None  # `None` in this context means to ignore the feature. Note it's different from `[]`.
 
@@ -527,9 +527,9 @@ def _transform_features_to_numbers(
     # We can't use `VarianceThreshold` directly here because it only supports numerical features.
     # We don't check for all types of features here because it's a bit complicated to do it in a generic way.
     if empty_multi_label_feature_names := [c
-                                           for c in df
+                                           for c in df.columns
                                            if (is_feature_multi_label(df[c])
-                                               and (df[c].transform(tuple) == tuple(df[c][0])).all())]:
+                                               and (df[c].transform(tuple) == tuple(df[c].iloc[0])).all())]:
         print("Multi-label features ignored because they are constant:", empty_multi_label_feature_names)
         df = df.drop(columns=empty_multi_label_feature_names)
 
@@ -679,10 +679,12 @@ def is_feature_binary(feature: np.ndarray | pd.Series) -> bool:
 
 
 def is_feature_multi_label(feature: np.ndarray | pd.Series) -> bool:
-    x = feature[0]  # We suppose the first one is representative to make it faster.
+    # We suppose the first one is representative to make it faster:
+    x = (feature.array if isinstance(feature, pd.Series) else feature)[0]
     return issubclass(type(x), Iterable) and not issubclass(type(x), str)
 
 
 def is_feature_string(feature: np.ndarray | pd.Series) -> bool:
-    x = feature[0]  # We suppose the first one is representative to make it faster.
+    # We suppose the first one is representative to make it faster:
+    x = (feature.array if isinstance(feature, pd.Series) else feature)[0]
     return issubclass(type(x), str)
