@@ -20,7 +20,8 @@ from statsmodels.regression.linear_model import RegressionResults
 from statsmodels.tools.tools import pinv_extended
 from tqdm.auto import tqdm
 
-from features import VALID_LEVIN_RETURN_MODES, is_feature_binary, is_feature_multi_label, load_features
+from features import VALID_LEVIN_RETURN_MODES, is_feature_binary, is_feature_multi_label, is_feature_string, \
+    load_features
 
 CLASSIFICATION_MODELS = {"dominance-score", "sklearn-clf"}
 REGRESSION_MODELS = {"mean-diff-and-corr", "lasso", "ols", "ridge", "sklearn"}
@@ -47,7 +48,8 @@ def obtain_top_examples_and_co_occurrences(feature_names: Iterable[str], raw_fea
     multi_label_features = {main_name
                             for name in feature_names
                             if ((main_name := name.split("_", maxsplit=1)[0]) in raw_features
-                                and is_feature_multi_label(raw_features[main_name]))}
+                                and (is_feature_multi_label(raw_features[main_name])
+                                     or is_feature_string(raw_features[main_name])))}
 
     examples = []
     co_occurrence_examples = []
