@@ -314,7 +314,7 @@ def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable
         df[f"{prefix}-common-{i}"] = common_results_df[column_name]
 
 
-def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[str] = frozenset(),
+def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[str] = (),
                       max_data_count: int | None = None, compute_neg_features: bool = True,
                       levin_return_mode: LevinReturnMode = "all",
                       compute_similarity_features: bool = True) -> pd.DataFrame:
@@ -327,6 +327,9 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
 
     # We use the underscore to separate a feature name from its value if it's binarized.
     df = df.rename(columns={"neg_type": "neg-type"})
+
+    if "number of words" not in feature_deny_list:
+        df["number of words"] = df.sentence.str.split().str.len()
 
     if compute_neg_features:
         df["word-original"] = df.apply(lambda row: _get_changed_word(row.pos_triplet, row["neg-type"]), axis=1)
