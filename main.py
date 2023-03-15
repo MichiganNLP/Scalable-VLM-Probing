@@ -90,7 +90,8 @@ def obtain_top_examples_and_co_occurrences(
                     non_common_co_occurrence_words = itertools.chain(rows_with_label["word-original"],
                                                                      rows_with_label["word-replacement"])
                 else:
-                    words = rows_with_label[f"word-{word_type}"]
+                    word_feature_name_prefix = "word" + ("s" if word_type.startswith("common-") else "")
+                    words = rows_with_label[f"{word_feature_name_prefix}-{word_type}"]
                     common_co_occurrence_words = (w
                                                   for other_word_type in
                                                   {"common-0", "common-1", "common-2"} - {word_type}
