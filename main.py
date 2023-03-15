@@ -240,7 +240,7 @@ def compute_mean_diff_and_corr(features: pd.DataFrame, dependent_variable: pd.Se
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="ols", choices=MODELS)
+    parser.add_argument("--model", default="mean-diff-and-corr", choices=MODELS)
     parser.add_argument("--input-path", default="data/merged.csv")
 
     parser.add_argument("--max-data-count", type=int)
