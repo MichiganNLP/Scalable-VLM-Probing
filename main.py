@@ -372,6 +372,8 @@ def main() -> None:
     df.to_csv(f"data/output_{args.dependent_variable_name}.csv")
 
     if args.plot:
+        sns.set_theme()
+
         top_k = 10
         top_df = pd.concat([df.iloc[:top_k], df[-top_k:]])
 
