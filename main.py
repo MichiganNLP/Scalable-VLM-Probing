@@ -64,7 +64,7 @@ def obtain_top_examples_and_co_occurrences(
 
             main_feature_name_prefix, word_type = main_feature_name.split("-", maxsplit=1)
             if word_type in {"common", "common-0", "common-1", "common-2", "original", "replacement"}:
-                mask = raw_features[main_feature_name].map(lambda labels: label in labels)
+                mask = raw_features[main_feature_name].map(lambda labels: _value_contains_label(labels, label))
                 rows_with_label = raw_features[mask]
 
                 if sample_size:
