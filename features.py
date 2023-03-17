@@ -6,11 +6,13 @@ import json
 import string
 import warnings
 from collections import Counter, defaultdict
+from pathlib import Path
 from typing import Any, Callable, Collection, Iterable, Literal, Mapping, MutableSequence, Sequence, Tuple, get_args
 
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from huggingface_hub import snapshot_download
 from nltk.corpus import wordnet as wn
 from nltk.stem import PorterStemmer, WordNetLemmatizer
 from pandas._typing import FilePath
@@ -26,8 +28,6 @@ from sklearn_pandas import DataFrameMapper
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from tqdm.auto import trange
 
-from util import cached_path_that_ignores_405
-
 NegType = Literal["s", "v", "o"]
 Pos = Literal["n", "v"]
 Triplet = Tuple[str, str, str]
@@ -37,14 +37,14 @@ LevinReturnMode = Literal["alternation", "semantic_broad", "semantic_fine_graine
 VALID_NEG_TYPES = get_args(NegType)
 VALID_LEVIN_RETURN_MODES = get_args(LevinReturnMode)
 
-PATH_LEVIN_VERBS = cached_path_that_ignores_405("https://www.dropbox.com/s/ka792tjegamjegu/levin_verbs.txt?dl=1")
-PATH_LEVIN_SEMANTIC_BROAD = cached_path_that_ignores_405("https://www.dropbox.com/s/2gunpcx8wtitewt/"
-                                                         "levin_semantic_broad.json?dl=1")
-PATH_LIWC = cached_path_that_ignores_405("https://www.dropbox.com/s/ai7733w4e0ejmq0/LIWC.2015.all.txt?dl=1")
-PATH_GENERAL_INQ = cached_path_that_ignores_405("https://www.dropbox.com/s/a6aj2o2g20zynxf/inquireraugmented.xls?dl=1")
-PATH_CONCRETENESS = cached_path_that_ignores_405("https://www.dropbox.com/s/ai7733w4e0ejmq0/LIWC.2015.all.txt?dl=1")
-PATH_WORD_FREQUENCIES = cached_path_that_ignores_405("https://www.dropbox.com/s/3rqzbq0kaeyuf27/"
-                                                     "words_counter_LAION.json?dl=1")
+PATH_DATA_FOLDER = Path(snapshot_download("MichiganNLP/probing-clip", repo_type="dataset"))
+
+PATH_LEVIN_VERBS = PATH_DATA_FOLDER / "levin_verbs.txt"
+PATH_LEVIN_SEMANTIC_BROAD = PATH_DATA_FOLDER / "levin_semantic_broad.json"
+PATH_LIWC = PATH_DATA_FOLDER / "LIWC.2015.all.txt"
+PATH_GENERAL_INQ = PATH_DATA_FOLDER / "inquirer_augmented.xls"
+PATH_CONCRETENESS = PATH_DATA_FOLDER / "concreteness.txt"
+PATH_WORD_FREQUENCIES = PATH_DATA_FOLDER / "words_counter_LAION.json"
 
 text_model = SentenceTransformer("all-MiniLM-L6-v2")
 
