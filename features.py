@@ -13,7 +13,8 @@ import pandas as pd
 import statsmodels.api as sm
 from nltk.corpus import wordnet as wn
 from nltk.stem import PorterStemmer, WordNetLemmatizer
-from pandas.core.dtypes.inference import is_float, is_bool
+from pandas._typing import FilePath
+from pandas.core.dtypes.inference import is_bool, is_float
 from sentence_transformers import SentenceTransformer, util
 from sklearn.base import BaseEstimator
 from sklearn.feature_selection import SelectorMixin, VarianceThreshold
@@ -25,6 +26,8 @@ from sklearn_pandas import DataFrameMapper
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from tqdm.auto import trange
 
+from util import cached_path_that_ignores_405
+
 NegType = Literal["s", "v", "o"]
 Pos = Literal["n", "v"]
 Triplet = Tuple[str, str, str]
@@ -34,12 +37,14 @@ LevinReturnMode = Literal["alternation", "semantic_broad", "semantic_fine_graine
 VALID_NEG_TYPES = get_args(NegType)
 VALID_LEVIN_RETURN_MODES = get_args(LevinReturnMode)
 
-PATH_LEVIN_VERBS = "data/levin_verbs.txt"
-PATH_LEVIN_SEMANTIC_BROAD = "data/levin_semantic_broad.json"
-PATH_LIWC = "data/LIWC.2015.all.txt"
-PATH_GENERALINQ = "data/inquireraugmented.xls"
-PATH_CONCRETENESS = "data/concreteness.txt"
-PATH_WORD_FREQUENCIES = "data/words_counter_LAION.json"
+PATH_LEVIN_VERBS = cached_path_that_ignores_405("https://www.dropbox.com/s/ka792tjegamjegu/levin_verbs.txt?dl=1")
+PATH_LEVIN_SEMANTIC_BROAD = cached_path_that_ignores_405("https://www.dropbox.com/s/2gunpcx8wtitewt/"
+                                                         "levin_semantic_broad.json?dl=1")
+PATH_LIWC = cached_path_that_ignores_405("https://www.dropbox.com/s/ai7733w4e0ejmq0/LIWC.2015.all.txt?dl=1")
+PATH_GENERAL_INQ = cached_path_that_ignores_405("https://www.dropbox.com/s/a6aj2o2g20zynxf/inquireraugmented.xls?dl=1")
+PATH_CONCRETENESS = cached_path_that_ignores_405("https://www.dropbox.com/s/ai7733w4e0ejmq0/LIWC.2015.all.txt?dl=1")
+PATH_WORD_FREQUENCIES = cached_path_that_ignores_405("https://www.dropbox.com/s/3rqzbq0kaeyuf27/"
+                                                     "words_counter_LAION.json?dl=1")
 
 text_model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -77,7 +82,7 @@ def _preprocess_sentences(sentences: pd.Series) -> pd.Series:
     return sentences.str.lower().str.translate(str.maketrans("", "", string.punctuation))
 
 
-def _load_clip_results(path: str) -> pd.DataFrame:
+def _load_clip_results(path: FilePath) -> pd.DataFrame:
     df = pd.read_csv(path, usecols=["sentence", "neg_sentence", "pos_triplet", "neg_triplet", "neg_type",
                                     "clip prediction", "clip_score_diff", "pos_clip_score",
                                     "neg_clip_score"]).sort_index()
@@ -109,7 +114,22 @@ def _neg_type_to_pos(neg_type: NegType) -> Pos:
     return "v" if neg_type == "v" else "n"  # noqa
 
 
-def _parse_levin_file(path: str = PATH_LEVIN_VERBS, path_semantic_broad: str = PATH_LEVIN_SEMANTIC_BROAD,
+def _parse_general_inq_file(path: FilePath = PATH_GENERAL_INQ) -> Mapping[str, Collection[str]]:
+    data = pd.read_excel(path, index_col=0)
+    dict_general = defaultdict(list)
+    for class_name in list(data.columns)[1:-2]:
+        for word in data[class_name][1:].index:
+            if not is_float(data[class_name][word]) and not is_bool(word):
+                dict_general[word.lower()].append(class_name)
+    print(f"Total # of General Inquirer classes:{len(dict_general.keys())}")
+    return dict_general
+
+
+def _get_general_inquirer_category(word: str, dict_general: Mapping[str, Collection[str]]) -> Collection[str]:
+    return dict_general.get(word, [])
+
+
+def _parse_levin_file(path: FilePath = PATH_LEVIN_VERBS, path_semantic_broad: str = PATH_LEVIN_SEMANTIC_BROAD,
                       return_mode: LevinReturnMode = "all", verbose: bool = True) -> Mapping[str, Collection[str]]:
     content = ""
     map_class_name_to_words = {}
@@ -177,24 +197,10 @@ def _parse_levin_file(path: str = PATH_LEVIN_VERBS, path_semantic_broad: str = P
     else:
         raise ValueError(f"Invalid return mode: {return_mode}")
 
-def _parse_generalinq_file():
-    data = pd.read_excel(PATH_GENERALINQ, index_col=0)
-    classes = list(data.columns)
-    dict_general = {}
-    for class_name in classes[1:-2]:
-        words = [word.lower() for word in data[class_name][1:].index if not is_float(data[class_name][word]) and not is_bool(word)]
-        for word in words:
-            if word not in dict_general:
-                dict_general[word] = []
-            dict_general[word].append(class_name)
-    print(f"Total # of General Inquirer classes:{len(dict_general.keys())}")
-    return dict_general
 
 def _get_levin_category(word: str, dict_levin: Mapping[str, Collection[str]], pos: Pos) -> Collection[str]:
     return dict_levin.get(word, []) if pos == "v" else []
 
-def _get_generalinquirel_category(word: str, dict_general: Mapping[str, Collection[str]]) -> Collection[str]:
-    return dict_general.get(word, [])
 
 def _get_nb_synsets(word: str, pos: Pos) -> int:  # noqa
     # We don't use the POS information because we're using this as a proxy of ambiguity.
@@ -226,7 +232,7 @@ def _get_frequency(word: str, word_frequencies: Mapping[str, int]) -> int:
     return word_frequencies.get(word, 0)
 
 
-def _parse_liwc_file(path: str = PATH_LIWC, verbose: bool = True) -> Mapping[str, Sequence[str]]:
+def _parse_liwc_file(path: FilePath = PATH_LIWC, verbose: bool = True) -> Mapping[str, Sequence[str]]:
     dict_liwc = defaultdict(list)
     liwc_categories = set()
 
@@ -250,7 +256,7 @@ def _get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Col
             for category in categories}
 
 
-def _parse_concreteness_file(path: str = PATH_CONCRETENESS) -> Mapping[str, float]:
+def _parse_concreteness_file(path: FilePath = PATH_CONCRETENESS) -> Mapping[str, float]:
     dict_concreteness = {}
     with open(path) as file:
         next(file)  # Skip the first line.
@@ -370,8 +376,8 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
                                        compute_neg_features=compute_neg_features)
 
     if "GeneralINQ" not in feature_deny_list:
-        dict_general = _parse_generalinq_file()
-        _compute_feature_for_each_word(df, "GeneralINQ", lambda w, _: _get_generalinquirel_category(w, dict_general),
+        dict_general = _parse_general_inq_file()
+        _compute_feature_for_each_word(df, "GeneralINQ", lambda w, _: _get_general_inquirer_category(w, dict_general),
                                        compute_neg_features=compute_neg_features)
 
     if "hypernym" not in feature_deny_list:
@@ -656,7 +662,7 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
     return raw_features, features, dependent_variable
 
 
-def load_features(path: str, dependent_variable_name: str, max_data_count: int | None = None,
+def load_features(path: FilePath, dependent_variable_name: str, max_data_count: int | None = None,
                   feature_deny_list: Collection[str] = frozenset(), standardize_dependent_variable: bool = True,
                   standardize_binary_features: bool = True, compute_neg_features: bool = True,
                   levin_return_mode: LevinReturnMode = "all", compute_similarity_features: bool = True,
