@@ -20,6 +20,7 @@ from statsmodels.regression.linear_model import RegressionResults
 from statsmodels.tools.tools import pinv_extended
 from tqdm.auto import tqdm
 
+from argparse_with_defaults import ArgumentParserWithDefaults
 from features import VALID_LEVIN_RETURN_MODES, is_feature_binary, is_feature_multi_label, is_feature_string, \
     load_features
 
@@ -252,7 +253,7 @@ def compute_mean_diff_and_corr(features: pd.DataFrame, dependent_variable: pd.Se
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
+    parser = ArgumentParserWithDefaults()
     parser.add_argument("--model", default="mean-diff-and-corr", choices=MODELS)
     parser.add_argument("--input-path", default="data/merged.csv")
 
