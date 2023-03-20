@@ -46,7 +46,8 @@ def fetch_image(instance: Instance) -> Instance:
 
 
 def preprocess_data(processor: ProcessorMixin, instance: Instance) -> Instance:
-    return processor(text=instance["caption"], images=instance["image"])  # noqa
+    return processor(text=instance["caption"], images=instance["image"], truncation=True,  # noqa
+                     padding=True, return_tensors="pt")
 
 
 def main() -> None:
@@ -68,9 +69,10 @@ def main() -> None:
     dataset = dataset.map(fetch_image, remove_columns=["image_url"])
 
     processor = AutoProcessor.from_pretrained(args.model_name_or_path)
-    dataset = dataset.map(lambda instance: preprocess_data(processor, instance), remove_columns=["image"])
+    dataset = dataset.map(lambda instance: preprocess_data(processor, instance), batched=True,
+                          batch_size=args.batch_size, remove_columns=["image"])
 
-    data_loader = DataLoader(dataset, batch_size=args.batch_size, num_workers=args.num_workers,
+    data_loader = DataLoader(dataset, batch_size=None, num_workers=args.num_workers,
                              pin_memory=args.device.type != "cpu")
 
     model = AutoModel.from_pretrained(args.model_name_or_path).to(args.device).eval()
@@ -79,9 +81,10 @@ def main() -> None:
 
     with torch.inference_mode():
         for batch in tqdm(data_loader):
-            batch = {k: v.to(args.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+            captions = batch.pop("caption")
+            batch = {k: v.to(args.device) for k, v in batch.items()}
             output = model(**batch)
-            scores.append(output.logits.cpu())
+            scores.append((captions, output.logits.cpu()))
 
     torch.save(scores, args.output_path)
 
