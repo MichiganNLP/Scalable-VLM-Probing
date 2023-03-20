@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import argparse
+import math
 import os
 import random
 from typing import Any, MutableMapping
@@ -12,6 +13,7 @@ from datasets import load_dataset
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import AutoModel, AutoProcessor, ProcessorMixin
+from transformers.models.clip.modeling_clip import CLIPModel
 
 from argparse_with_defaults import ArgumentParserWithDefaults
 
@@ -28,6 +30,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", default="red_caps",
                         help="See options at https://huggingface.co/datasets?"
                              "task_categories=task_categories:image-to-text")
+    parser.add_argument("--dataset-split", default="train")
+    parser.add_argument("--dataset-streaming-mode", action="store_true",
+                        help="Use streaming mode for the dataset. This is useful for large datasets that don't fit in"
+                             " memory (the captions; because the images are downloaded on demand) or that take time to"
+                             " download. Note that, in streaming mode, the dataset is shuffled by relatively small"
+                             " buffers, instead of being completely shuffled. This can lead to a certain dataset order,"
+                             " and mess with statistical properties if only a portion of the dataset is used in this"
+                             " mode (i.e., you're not taking a random sample of the dataset).")
+
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int,
                         default=len(os.sched_getaffinity(0)) // max(torch.cuda.device_count(), 1))
@@ -41,12 +52,17 @@ def parse_args() -> argparse.Namespace:
 
 
 def fetch_image(instance: Instance) -> Instance:
-    return {"image": Image.open(cached_path(instance["image_url"]))}
+    return {"image": Image.open(cached_path(instance["image_url"], quiet=True))}
 
 
 def preprocess_data(processor: ProcessorMixin, instance: Instance) -> Instance:
     return processor(text=instance["caption"], images=instance["image"], truncation=True,  # noqa
                      padding=True, return_tensors="pt")
+
+
+def compute_scores(model: CLIPModel, batch: Instance) -> torch.Tensor:
+    output = model(**batch, return_dict=True)
+    return (output.text_embeds * output.image_embeds).sum(dim=-1)
 
 
 def main() -> None:
@@ -63,9 +79,14 @@ def main() -> None:
     # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 
-    dataset = load_dataset(args.dataset, split="train", streaming=True)
+    # We tokenize the text in each data loading worker, which in turn is supposed to run in its own process.
+    # So we disable the HuggingFace fast tokenizer parallelism (if available) because we're already doing parallelism
+    # at the data loading level. It should be more efficient this way.
+    os.environ["TOKENIZERS_PARALLELISM"] = "0"
+
+    dataset = load_dataset(args.dataset, split=args.dataset_split, streaming=args.dataset_streaming_mode)
     dataset = dataset.select_columns(["image_url", "caption"])
-    # TODO: shuffle to avoid certain dataset order?
+    dataset = dataset.shuffle()  # Avoid a certain dataset order, for statistical reasons.
     dataset = dataset.map(fetch_image, remove_columns=["image_url"])
 
     processor = AutoProcessor.from_pretrained(args.model_name_or_path)
@@ -80,10 +101,11 @@ def main() -> None:
     score_list = []
 
     with torch.inference_mode():
-        for batch in tqdm(data_loader):
+        for batch in tqdm(data_loader,
+                          total=math.ceil(dataset.info.splits[args.dataset_split].num_examples / args.batch_size)):
             captions = batch.pop("caption")
-            output = model(**{k: v.to(args.device) for k, v in batch.items()}, return_dict=True)
-            scores = (output.text_embeds * output.image_embeds).sum(dim=-1)
+            batch = {k: v.to(args.device) for k, v in batch.items()}
+            scores = compute_scores(model=model, batch=batch)
             score_list.append((captions, scores.cpu()))
 
     torch.save(score_list, args.output_path)
