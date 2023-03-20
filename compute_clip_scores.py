@@ -6,6 +6,7 @@ import random
 from typing import Any, MutableMapping
 
 import numpy as np
+import pandas as pd
 import torch
 from PIL import Image
 from cached_path import cached_path
@@ -39,6 +40,9 @@ def parse_args() -> argparse.Namespace:
                              " and mess with statistical properties if only a portion of the dataset is used in this"
                              " mode (i.e., you're not taking a random sample of the dataset).")
 
+    parser.add_argument("--shuffle", action="store_true",
+                        help="Shuffle to avoid a certain dataset order, for statistical reasons.")
+
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int,
                         default=len(os.sched_getaffinity(0)) // max(torch.cuda.device_count(), 1))
@@ -46,7 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-name-or-path", default="openai/clip-vit-large-patch14",
                         help="See options at https://huggingface.co/models?pipeline_tag=zero-shot-image-classification")
 
-    parser.add_argument("--output-path", default="output.pt")
+    parser.add_argument("--output-path", default="output.csv")
 
     return parser.parse_args()
 
@@ -89,8 +93,11 @@ def main() -> None:
     os.environ["TOKENIZERS_PARALLELISM"] = "0"
 
     dataset = load_dataset(args.dataset, split=args.dataset_split, streaming=args.dataset_streaming_mode)
-    dataset = dataset.select_columns(["image_url", "caption"])
-    dataset = dataset.shuffle()  # Avoid a certain dataset order, for statistical reasons.
+    dataset = dataset.select_columns(["image_id", "caption", "image_url"])
+
+    if args.shuffle:
+        dataset = dataset.shuffle()
+
     dataset = dataset.map(fetch_image, remove_columns=["image_url"])
 
     processor = AutoProcessor.from_pretrained(args.model_name_or_path)
@@ -102,17 +109,21 @@ def main() -> None:
 
     model = AutoModel.from_pretrained(args.model_name_or_path).to(args.device).eval()
 
+    image_ids = []
+    text_list = []
     score_list = []
 
     with torch.inference_mode():
         for batch in tqdm(data_loader,
                           total=math.ceil(dataset.info.splits[args.dataset_split].num_examples / args.batch_size)):
-            captions = batch.pop("caption")
-            batch = {k: v.to(args.device) for k, v in batch.items()}
-            scores = compute_scores(model=model, batch=batch)
-            score_list.append((captions, scores.cpu()))
+            image_ids.extend(batch.pop("image_id"))
+            text_list.extend(batch.pop("caption"))
+            score_list.extend(compute_scores(model=model,
+                                             batch={k: v.to(args.device) for k, v in batch.items()}).tolist())
+            break
 
-    torch.save(score_list, args.output_path)
+    pd.DataFrame({"image_id": image_ids, "sentence": text_list, "score": score_list}).to_csv(args.output_path,
+                                                                                             index=False)
 
 
 if __name__ == "__main__":
