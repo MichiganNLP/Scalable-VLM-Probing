@@ -51,6 +51,17 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def set_deterministic_mode(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    torch.use_deterministic_algorithms(True)
+    # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+
+
 def fetch_image(instance: Instance) -> Instance:
     return {"image": Image.open(cached_path(instance["image_url"], quiet=True))}
 
@@ -70,14 +81,7 @@ def main() -> None:
 
     print(args)
 
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
-
-    torch.use_deterministic_algorithms(True)
-    # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
-    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+    set_deterministic_mode(args.seed)
 
     # We tokenize the text in each data loading worker, which in turn is supposed to run in its own process.
     # So we disable the HuggingFace fast tokenizer parallelism (if available) because we're already doing parallelism
