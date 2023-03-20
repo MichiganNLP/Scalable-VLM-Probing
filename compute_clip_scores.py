@@ -43,6 +43,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--shuffle", action="store_true",
                         help="Shuffle to avoid a certain dataset order, for statistical reasons.")
 
+    parser.add_argument("--max-examples", type=int)
+
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int,
                         default=len(os.sched_getaffinity(0)) // max(torch.cuda.device_count(), 1))
@@ -95,6 +97,12 @@ def main() -> None:
     dataset = load_dataset(args.dataset, split=args.dataset_split, streaming=args.dataset_streaming_mode)
     dataset = dataset.select_columns(["image_id", "caption", "image_url"])
 
+    num_examples = dataset.info.splits[args.dataset_split].num_examples
+
+    if args.max_examples:
+        num_examples = min(args.max_examples, num_examples)
+        dataset = dataset.take(num_examples)
+
     if args.shuffle:
         dataset = dataset.shuffle()
 
@@ -114,13 +122,11 @@ def main() -> None:
     score_list = []
 
     with torch.inference_mode():
-        for batch in tqdm(data_loader,
-                          total=math.ceil(dataset.info.splits[args.dataset_split].num_examples / args.batch_size)):
+        for batch in tqdm(data_loader, total=math.ceil(num_examples / args.batch_size)):
             image_ids.extend(batch.pop("image_id"))
             text_list.extend(batch.pop("caption"))
             score_list.extend(compute_scores(model=model,
                                              batch={k: v.to(args.device) for k, v in batch.items()}).tolist())
-            break
 
     pd.DataFrame({"image_id": image_ids, "sentence": text_list, "score": score_list}).to_csv(args.output_path,
                                                                                              index=False)
