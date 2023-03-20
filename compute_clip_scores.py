@@ -41,7 +41,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def fetch_image(instance: Instance) -> Instance:
-    # return {"image": Image.open(requests.get(instance["image_url"], stream=True).raw)}
     return {"image": Image.open(cached_path(instance["image_url"]))}
 
 
@@ -66,27 +65,28 @@ def main() -> None:
 
     dataset = load_dataset(args.dataset, split="train", streaming=True)
     dataset = dataset.select_columns(["image_url", "caption"])
+    # TODO: shuffle to avoid certain dataset order?
     dataset = dataset.map(fetch_image, remove_columns=["image_url"])
 
     processor = AutoProcessor.from_pretrained(args.model_name_or_path)
     dataset = dataset.map(lambda instance: preprocess_data(processor, instance), batched=True,
                           batch_size=args.batch_size, remove_columns=["image"])
 
-    data_loader = DataLoader(dataset, batch_size=None, num_workers=args.num_workers,
+    data_loader = DataLoader(dataset, batch_size=args.batch_size, num_workers=args.num_workers,
                              pin_memory=args.device.type != "cpu")
 
     model = AutoModel.from_pretrained(args.model_name_or_path).to(args.device).eval()
 
-    scores = []
+    score_list = []
 
     with torch.inference_mode():
         for batch in tqdm(data_loader):
             captions = batch.pop("caption")
-            batch = {k: v.to(args.device) for k, v in batch.items()}
-            output = model(**batch)
-            scores.append((captions, output.logits.cpu()))
+            output = model(**{k: v.to(args.device) for k, v in batch.items()}, return_dict=True)
+            scores = (output.text_embeds * output.image_embeds).sum(dim=-1)
+            score_list.append((captions, scores.cpu()))
 
-    torch.save(scores, args.output_path)
+    torch.save(score_list, args.output_path)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,6 @@ sklearn-pandas==2.2.0
 statsmodels==0.13.5
 torch==2.0.0
 tqdm==4.65.0
-transformers==4.27.1
+transformers==4.27.2
 word_forms==2.1.0
-xlrd==2.0.1 # To read the General Inquirer file.
+xlrd==2.0.1  # To read the General Inquirer file.
