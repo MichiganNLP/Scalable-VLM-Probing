@@ -72,7 +72,10 @@ def set_deterministic_mode(seed: int) -> None:
 
 
 def fetch_image(instance: Instance) -> Instance:
-    return {"image": Image.open(cached_path(instance["image_url"], quiet=True))}
+    try:
+        return {"image": Image.open(cached_path(instance["image_url"], quiet=True))}
+    except FileNotFoundError:
+        return {"image": None}
 
 
 def preprocess_data(processor: ProcessorMixin, instance: Instance) -> Instance:
@@ -117,6 +120,7 @@ def main() -> None:
         fetch_image_map_kwargs["num_proc"] = args.num_workers
         fetch_image_map_kwargs["desc"] = "Downloading the images"
     dataset = dataset.map(fetch_image, remove_columns=["image_url"], **fetch_image_map_kwargs)
+    dataset = dataset.filter(lambda instance: instance["image"] is not None)
 
     processor = AutoProcessor.from_pretrained(args.model_name_or_path)
     preprocess_data_map_kwargs = {}
