@@ -1,19 +1,19 @@
 #!/usr/bin/env python
 import argparse
 import logging
-
-import PIL
-import math
 import os
 import random
 from typing import Any, Iterable, MutableMapping
 
+import PIL
+import math
 import numpy as np
 import pandas as pd
 import torch
 from PIL import Image
 from cached_path import cached_path
 from datasets import IterableDataset, load_dataset
+from requests import HTTPError
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import AutoModel, AutoProcessor, ProcessorMixin
@@ -85,7 +85,7 @@ def set_deterministic_mode(seed: int) -> None:
 def fetch_image(instance: Instance) -> Instance:
     try:
         image = Image.open(cached_path(instance["image_url"], quiet=True))
-    except (FileNotFoundError, PIL.UnidentifiedImageError):
+    except (FileNotFoundError, HTTPError, PIL.UnidentifiedImageError):
         image = None
 
     return {"image": image}
