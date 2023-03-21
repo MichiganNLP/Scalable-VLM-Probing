@@ -3,6 +3,9 @@ import argparse
 import logging
 import os
 import random
+import re
+import sys
+import traceback
 from typing import Any, Iterable, MutableMapping
 
 import PIL
@@ -82,10 +85,39 @@ def set_deterministic_mode(seed: int) -> None:
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 
 
+def get_imgur_urls_maybe(url: str) -> Iterable[str]:
+    if "imgur.com" in url:
+        for part in url.split(","):
+            if part:
+                part = part.strip()
+
+                root, ext = os.path.splitext(part)
+                root = root if root.startswith("http") else ("http://i.imgur.com/" + root)  # noqa
+                root = root.split("#", maxsplit=1)[0]
+                ext = ext or ".jpg"
+                ext = re.split(r"[?#]", ext, maxsplit=1)[0]
+
+                yield root + ext
+    else:
+        yield url
+
+
+def get_image_urls(instance: Instance) -> Iterable[str]:
+    for image_url in re.findall(r"http\S+", instance["image_url"]) or [instance["image_url"]]:
+        yield from get_imgur_urls_maybe(image_url)
+
+
 def fetch_image(instance: Instance) -> Instance:
+    image_url = next(iter(get_image_urls(instance)))
+
     try:
-        image = Image.open(cached_path(instance["image_url"], quiet=True))
+        image = Image.open(cached_path(image_url, quiet=True))
     except (FileNotFoundError, HTTPError, PIL.UnidentifiedImageError):
+        image = None
+    except Exception as e:  # noqa
+        print("Unknown error while fetching an image:", file=sys.stderr)
+        traceback.print_exc()
+        print("The image will be skipped.")
         image = None
 
     return {"image": image}
