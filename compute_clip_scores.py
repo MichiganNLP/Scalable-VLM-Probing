@@ -108,12 +108,12 @@ def main() -> None:
 
     num_examples = dataset.info.splits[args.dataset_split].num_examples
 
+    if args.shuffle:
+        dataset = dataset.shuffle()
+
     if args.max_examples:
         num_examples = min(args.max_examples, num_examples)
         dataset = dataset.take(num_examples)
-
-    if args.shuffle:
-        dataset = dataset.shuffle()
 
     fetch_image_map_kwargs = {}
     if not args.dataset_streaming_mode:
