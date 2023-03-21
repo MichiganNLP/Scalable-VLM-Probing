@@ -6,7 +6,7 @@ import PIL
 import math
 import os
 import random
-from typing import Any, MutableMapping
+from typing import Any, Iterable, MutableMapping
 
 import numpy as np
 import pandas as pd
@@ -101,6 +101,10 @@ def compute_scores(model: CLIPModel, batch: Instance) -> torch.Tensor:
     return (output.text_embeds * output.image_embeds).sum(dim=-1)
 
 
+def save_output(image_ids: Iterable[str], text_list: Iterable[str], score_list: Iterable[float], path: str) -> None:
+    pd.DataFrame({"image_id": image_ids, "sentence": text_list, "score": score_list}).to_csv(path, index=False)
+
+
 def main() -> None:
     args = parse_args()
 
@@ -161,14 +165,16 @@ def main() -> None:
     score_list = []
 
     with torch.inference_mode():
-        for batch in tqdm(data_loader, total=math.ceil(num_examples / args.batch_size)):
+        for i, batch in enumerate(tqdm(data_loader, total=math.ceil(num_examples / args.batch_size))):
             image_ids.extend(batch.pop("image_id"))
             text_list.extend(batch.pop("caption"))
             score_list.extend(compute_scores(model=model,
                                              batch={k: v.to(args.device) for k, v in batch.items()}).tolist())
 
-    pd.DataFrame({"image_id": image_ids, "sentence": text_list, "score": score_list}).to_csv(args.output_path,
-                                                                                             index=False)
+            if i % 1000 == 1:  # Save the data occasionally in case there's a crash.
+                save_output(image_ids, text_list, score_list, path=args.output_path)
+
+    save_output(image_ids, text_list, score_list, path=args.output_path)
 
 
 if __name__ == "__main__":
