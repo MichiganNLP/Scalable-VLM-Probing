@@ -99,7 +99,8 @@ def main() -> None:
     # at the data loading level. It should be more efficient this way.
     os.environ["TOKENIZERS_PARALLELISM"] = "0"
 
-    dataset = load_dataset(args.dataset, split=args.dataset_split, streaming=args.dataset_streaming_mode)
+    dataset = load_dataset(args.dataset, split=args.dataset_split, streaming=args.dataset_streaming_mode,
+                           num_proc=None if args.dataset_streaming_mode else args.num_workers)
     dataset = dataset.select_columns(["image_id", "caption", "image_url"])
 
     num_examples = dataset.info.splits[args.dataset_split].num_examples
@@ -111,11 +112,19 @@ def main() -> None:
     if args.shuffle:
         dataset = dataset.shuffle()
 
-    dataset = dataset.map(fetch_image, remove_columns=["image_url"])
+    fetch_image_map_kwargs = {}
+    if not args.dataset_streaming_mode:
+        fetch_image_map_kwargs["num_proc"] = args.num_workers
+        fetch_image_map_kwargs["desc"] = "Downloading the images"
+    dataset = dataset.map(fetch_image, remove_columns=["image_url"], **fetch_image_map_kwargs)
 
     processor = AutoProcessor.from_pretrained(args.model_name_or_path)
+    preprocess_data_map_kwargs = {}
+    if not args.dataset_streaming_mode:
+        preprocess_data_map_kwargs["num_proc"] = args.num_workers
+        preprocess_data_map_kwargs["desc"] = "Preprocessing the data"
     dataset = dataset.map(lambda instance: preprocess_data(processor, instance), batched=True,
-                          batch_size=args.batch_size, remove_columns=["image"])
+                          batch_size=args.batch_size, remove_columns=["image"], **preprocess_data_map_kwargs)
 
     data_loader = DataLoader(dataset, batch_size=args.batch_size, num_workers=args.num_workers,
                              pin_memory=args.device.type != "cpu")
