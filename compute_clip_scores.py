@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import argparse
+import logging
 import math
 import os
 import random
@@ -54,6 +55,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--output-path", default="output.csv")
 
+    parser.add_argument("--logging-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+
     return parser.parse_args()
 
 
@@ -86,6 +89,8 @@ def main() -> None:
     args = parse_args()
 
     print(args)
+
+    logging.getLogger().setLevel(args.logging_level.upper())
 
     set_deterministic_mode(args.seed)
 
