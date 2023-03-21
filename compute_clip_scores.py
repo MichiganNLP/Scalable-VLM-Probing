@@ -11,7 +11,7 @@ import pandas as pd
 import torch
 from PIL import Image
 from cached_path import cached_path
-from datasets import load_dataset
+from datasets import IterableDataset, load_dataset
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import AutoModel, AutoProcessor, ProcessorMixin
@@ -33,13 +33,20 @@ def parse_args() -> argparse.Namespace:
                         help="See options at https://huggingface.co/datasets?"
                              "task_categories=task_categories:image-to-text")
     parser.add_argument("--dataset-split", default="train")
-    parser.add_argument("--dataset-streaming-mode", action="store_true",
-                        help="Use streaming mode for the dataset. This is useful for large datasets that don't fit in"
+    parser.add_argument("--dataset-streaming-mode", default="map", choices=["load", "map", "none"],
+                        help="Streaming mode for the dataset. \"load\" means that the dataset is in streaming mode when"
+                             " loaded, \"map\" means that the dataset is in streaming mode before any map function is"
+                             " applied, and \"none\" means that the dataset is not in streaming mode.\n"
+                             " This is useful for large datasets that don't fit in"
                              " memory (the captions; because the images are downloaded on demand) or that take time to"
                              " download. Note that, in streaming mode, the dataset is shuffled by relatively small"
                              " buffers, instead of being completely shuffled. This can lead to a certain dataset order,"
                              " and mess with statistical properties if only a portion of the dataset is used in this"
-                             " mode (i.e., you're not taking a random sample of the dataset).")
+                             " mode (i.e., you're not taking a random sample of the dataset).\n"
+                             " Thus, is recommended to avoid streaming mode if the dataset is small. If it's not small,"
+                             " you should use streaming mode when loading if you know it has a random order (supposing"
+                             " you care about a random sample), otherwise you should use the streaming mode when"
+                             " mapping (by shuffling and taking a subset before downloading the images).")
 
     parser.add_argument("--shuffle", action="store_true",
                         help="Shuffle to avoid a certain dataset order, for statistical reasons.")
@@ -102,8 +109,8 @@ def main() -> None:
     # at the data loading level. It should be more efficient this way.
     os.environ["TOKENIZERS_PARALLELISM"] = "0"
 
-    dataset = load_dataset(args.dataset, split=args.dataset_split, streaming=args.dataset_streaming_mode,
-                           num_proc=None if args.dataset_streaming_mode else args.num_workers)
+    dataset = load_dataset(args.dataset, split=args.dataset_split, streaming=args.dataset_streaming_mode == "load",
+                           num_proc=None if args.dataset_streaming_mode == "load" else args.num_workers)
     dataset = dataset.select_columns(["image_id", "caption", "image_url"])
 
     num_examples = dataset.info.splits[args.dataset_split].num_examples
@@ -113,10 +120,16 @@ def main() -> None:
 
     if args.max_examples:
         num_examples = min(args.max_examples, num_examples)
-        dataset = dataset.take(num_examples)
+        if isinstance(dataset, IterableDataset):
+            dataset = dataset.take(num_examples)
+        else:
+            dataset = dataset.select(range(num_examples))
+
+    if args.dataset_streaming_mode == "map":
+        dataset = dataset.to_iterable_dataset(num_shards=args.num_workers)
 
     fetch_image_map_kwargs = {}
-    if not args.dataset_streaming_mode:
+    if not isinstance(dataset, IterableDataset):
         fetch_image_map_kwargs["num_proc"] = args.num_workers
         fetch_image_map_kwargs["desc"] = "Downloading the images"
     dataset = dataset.map(fetch_image, remove_columns=["image_url"], **fetch_image_map_kwargs)
@@ -124,7 +137,7 @@ def main() -> None:
 
     processor = AutoProcessor.from_pretrained(args.model_name_or_path)
     preprocess_data_map_kwargs = {}
-    if not args.dataset_streaming_mode:
+    if not isinstance(dataset, IterableDataset):
         preprocess_data_map_kwargs["num_proc"] = args.num_workers
         preprocess_data_map_kwargs["desc"] = "Preprocessing the data"
     dataset = dataset.map(lambda instance: preprocess_data(processor, instance), batched=True,
