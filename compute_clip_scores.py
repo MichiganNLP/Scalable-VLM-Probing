@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import argparse
 import logging
+
+import PIL
 import math
 import os
 import random
@@ -55,7 +57,9 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int,
-                        default=len(os.sched_getaffinity(0)) // max(torch.cuda.device_count(), 1))
+                        default=len(os.sched_getaffinity(0)) // max(torch.cuda.device_count(), 1),
+                        help="Number of workers used where parallelization is allowed. Zero means the default value"
+                             " (generally it means running from the main thread).")
 
     parser.add_argument("--model-name-or-path", default="openai/clip-vit-large-patch14",
                         help="See options at https://huggingface.co/models?pipeline_tag=zero-shot-image-classification")
@@ -80,9 +84,11 @@ def set_deterministic_mode(seed: int) -> None:
 
 def fetch_image(instance: Instance) -> Instance:
     try:
-        return {"image": Image.open(cached_path(instance["image_url"], quiet=True))}
-    except FileNotFoundError:
-        return {"image": None}
+        image = Image.open(cached_path(instance["image_url"], quiet=True))
+    except (FileNotFoundError, PIL.UnidentifiedImageError):
+        image = None
+
+    return {"image": image}
 
 
 def preprocess_data(processor: ProcessorMixin, instance: Instance) -> Instance:
@@ -110,7 +116,7 @@ def main() -> None:
     os.environ["TOKENIZERS_PARALLELISM"] = "0"
 
     dataset = load_dataset(args.dataset, split=args.dataset_split, streaming=args.dataset_streaming_mode == "load",
-                           num_proc=None if args.dataset_streaming_mode == "load" else args.num_workers)
+                           num_proc=None if args.dataset_streaming_mode == "load" else (args.num_workers or None))
     dataset = dataset.select_columns(["image_id", "caption", "image_url"])
 
     num_examples = dataset.info.splits[args.dataset_split].num_examples
@@ -126,11 +132,11 @@ def main() -> None:
             dataset = dataset.select(range(num_examples))
 
     if args.dataset_streaming_mode == "map":
-        dataset = dataset.to_iterable_dataset(num_shards=args.num_workers)
+        dataset = dataset.to_iterable_dataset(num_shards=args.num_workers or 1)
 
     fetch_image_map_kwargs = {}
     if not isinstance(dataset, IterableDataset):
-        fetch_image_map_kwargs["num_proc"] = args.num_workers
+        fetch_image_map_kwargs["num_proc"] = args.num_workers or None
         fetch_image_map_kwargs["desc"] = "Downloading the images"
     dataset = dataset.map(fetch_image, remove_columns=["image_url"], **fetch_image_map_kwargs)
     dataset = dataset.filter(lambda instance: instance["image"] is not None)
@@ -138,7 +144,7 @@ def main() -> None:
     processor = AutoProcessor.from_pretrained(args.model_name_or_path)
     preprocess_data_map_kwargs = {}
     if not isinstance(dataset, IterableDataset):
-        preprocess_data_map_kwargs["num_proc"] = args.num_workers
+        preprocess_data_map_kwargs["num_proc"] = args.num_workers or None
         preprocess_data_map_kwargs["desc"] = "Preprocessing the data"
     dataset = dataset.map(lambda instance: preprocess_data(processor, instance), batched=True,
                           batch_size=args.batch_size, remove_columns=["image"], **preprocess_data_map_kwargs)
@@ -146,7 +152,9 @@ def main() -> None:
     data_loader = DataLoader(dataset, batch_size=args.batch_size, num_workers=args.num_workers,
                              pin_memory=args.device.type != "cpu")
 
+    print("Loading the model…")
     model = AutoModel.from_pretrained(args.model_name_or_path).to(args.device).eval()
+    print("Model loaded.")
 
     image_ids = []
     text_list = []
