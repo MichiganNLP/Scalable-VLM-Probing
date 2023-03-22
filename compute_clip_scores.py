@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 import argparse
 import collections.abc
+import itertools
 import logging
 import os
 import random
 import re
 import sys
 import traceback
-from typing import Any, Iterable, MutableMapping
+from typing import Any, Iterable, MutableMapping, Tuple
 
 import PIL
 import math
@@ -106,7 +107,8 @@ def get_imgur_urls_maybe(url: str) -> Iterable[str]:
 
 
 def get_image_urls(instance: Instance) -> Iterable[str]:
-    for image_url in re.findall(r"http\S+", instance["image_url"]) or [instance["image_url"]]:
+    url = instance.get("image_url") or instance["pos_url"]
+    for image_url in re.findall(r"http\S+", url) or [url]:
         yield from get_imgur_urls_maybe(image_url)
 
 
@@ -127,17 +129,9 @@ def fetch_image(instance: Instance) -> Instance:
 
 
 def preprocess_data(processor: ProcessorMixin, instance: Instance) -> Instance:
-    return processor(text=instance["caption"], images=instance["image"], truncation=True,  # noqa
+    text = instance.get("caption") or instance["sentence"]
+    return processor(text=text, images=instance["image"], truncation=True,  # noqa
                      padding=True, return_tensors="pt")
-
-
-def compute_scores(model: CLIPModel, batch: Instance) -> torch.Tensor:
-    output = model(**batch, return_dict=True)
-    return (output.text_embeds * output.image_embeds).sum(dim=-1)
-
-
-def save_output(batches: Iterable[Instance], path: str) -> None:
-    pd.DataFrame(batches).to_csv(path, index=False)
 
 
 def get_non_collatable_columns(instance: Instance) -> Iterable[str]:
@@ -145,6 +139,23 @@ def get_non_collatable_columns(instance: Instance) -> Iterable[str]:
         if not (any(isinstance(v, types) for types in default_collate_fn_map)
                 or isinstance(v, (collections.abc.Sequence, collections.abc.Mapping))):
             yield k
+
+
+def compute_scores(model: CLIPModel, batch: Instance) -> torch.Tensor:
+    output = model(**batch, return_dict=True)
+    return (output.text_embeds * output.image_embeds).sum(dim=-1)
+
+
+def zip_equal(*iterables: Iterable[Any]) -> Iterable[Tuple[Any, ...]]:
+    sentinel = object()
+    for combo in itertools.zip_longest(*iterables, fillvalue=sentinel):
+        if sentinel in combo:
+            raise ValueError("Iterables have different lengths")
+        yield combo
+
+
+def save_output(batches: Iterable[Instance], path: str) -> None:
+    pd.DataFrame(batches).to_csv(path, index=False)
 
 
 def main() -> None:
@@ -216,7 +227,8 @@ def main() -> None:
             batch = {k: v.tolist() if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
             # Go from a dict of lists to a "list" of dicts:
-            batches.extend(dict(zip(batch.keys(), instance_tuple)) for instance_tuple in zip(*batch.values()))
+            batches.extend(dict(zip_equal(batch.keys(), instance_tuple))  # noqa
+                           for instance_tuple in zip_equal(*batch.values()))
 
             if i % 1000 == 1:  # Save the data occasionally in case there's a crash.
                 save_output(batches, path=args.output_path)
