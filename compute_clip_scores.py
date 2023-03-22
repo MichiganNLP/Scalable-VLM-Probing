@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import argparse
+import collections.abc
 import logging
 import os
 import random
@@ -18,6 +19,7 @@ from cached_path import cached_path
 from datasets import IterableDataset, load_dataset
 from requests import HTTPError
 from torch.utils.data import DataLoader
+from torch.utils.data._utils.collate import default_collate_fn_map
 from tqdm.auto import tqdm
 from transformers import AutoModel, AutoProcessor, ProcessorMixin
 from transformers.models.clip.modeling_clip import CLIPModel
@@ -134,8 +136,15 @@ def compute_scores(model: CLIPModel, batch: Instance) -> torch.Tensor:
     return (output.text_embeds * output.image_embeds).sum(dim=-1)
 
 
-def save_output(image_ids: Iterable[str], text_list: Iterable[str], score_list: Iterable[float], path: str) -> None:
-    pd.DataFrame({"image_id": image_ids, "sentence": text_list, "score": score_list}).to_csv(path, index=False)
+def save_output(batches: Iterable[Instance], path: str) -> None:
+    pd.DataFrame(batches).to_csv(path, index=False)
+
+
+def get_non_collatable_columns(instance: Instance) -> Iterable[str]:
+    for k, v in instance.items():
+        if not (any(isinstance(v, types) for types in default_collate_fn_map)
+                or isinstance(v, (collections.abc.Sequence, collections.abc.Mapping))):
+            yield k
 
 
 def main() -> None:
@@ -156,7 +165,6 @@ def main() -> None:
     dataset = load_dataset(args.dataset, split=args.dataset_split, data_files=data_files,
                            streaming=args.dataset_streaming_mode == "load",
                            num_proc=None if args.dataset_streaming_mode == "load" else (args.num_workers or None))
-    dataset = dataset.select_columns(["image_id", "caption", "image_url"])
 
     num_examples = dataset.info.splits[args.dataset_split].num_examples
 
@@ -177,7 +185,7 @@ def main() -> None:
     if not isinstance(dataset, IterableDataset):
         fetch_image_map_kwargs["num_proc"] = args.num_workers or None
         fetch_image_map_kwargs["desc"] = "Downloading the images"
-    dataset = dataset.map(fetch_image, remove_columns=["image_url"], **fetch_image_map_kwargs)
+    dataset = dataset.map(fetch_image, **fetch_image_map_kwargs)
     dataset = dataset.filter(lambda instance: instance["image"] is not None)
 
     processor = AutoProcessor.from_pretrained(args.model_name_or_path)
@@ -188,6 +196,7 @@ def main() -> None:
     dataset = dataset.map(lambda instance: preprocess_data(processor, instance), batched=True,
                           batch_size=args.batch_size, remove_columns=["image"], **preprocess_data_map_kwargs)
 
+    dataset = dataset.remove_columns(list(get_non_collatable_columns(next(iter(dataset)))))
     data_loader = DataLoader(dataset, batch_size=args.batch_size, num_workers=args.num_workers,
                              pin_memory=args.device.type != "cpu")
 
@@ -195,21 +204,24 @@ def main() -> None:
     model = AutoModel.from_pretrained(args.model_name_or_path).to(args.device).eval()
     print("Model loaded.")
 
-    image_ids = []
-    text_list = []
-    score_list = []
+    batches = []
 
     with torch.inference_mode():
         for i, batch in enumerate(tqdm(data_loader, total=math.ceil(num_examples / args.batch_size))):
-            image_ids.extend(batch.pop("image_id"))
-            text_list.extend(batch.pop("caption"))
-            score_list.extend(compute_scores(model=model,
-                                             batch={k: v.to(args.device) for k, v in batch.items()}).tolist())
+            model_inputs = {k: batch.pop(k).to(args.device)
+                            for k in list(batch.keys())  # We need to copy the keys because we're modifying the dict.
+                            if k in {"input_ids", "attention_mask", "pixel_values"}}
+            batch["clip_score"] = compute_scores(model=model, batch=model_inputs).tolist()
+
+            batch = {k: v.tolist() if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+
+            # Go from a dict of lists to a "list" of dicts:
+            batches.extend(dict(zip(batch.keys(), instance_tuple)) for instance_tuple in zip(*batch.values()))
 
             if i % 1000 == 1:  # Save the data occasionally in case there's a crash.
-                save_output(image_ids, text_list, score_list, path=args.output_path)
+                save_output(batches, path=args.output_path)
 
-    save_output(image_ids, text_list, score_list, path=args.output_path)
+    save_output(batches, path=args.output_path)
 
 
 if __name__ == "__main__":
