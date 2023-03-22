@@ -1,6 +1,9 @@
 #!/usr/bin/env python
+from __future__ import annotations
+
 import argparse
 import collections.abc
+import io
 import itertools
 import logging
 import os
@@ -14,10 +17,13 @@ import PIL
 import math
 import numpy as np
 import pandas as pd
+import requests
 import torch
 from PIL import Image
 from cached_path import cached_path
+from cached_path.schemes import HttpClient, add_scheme_client
 from datasets import IterableDataset, concatenate_datasets, load_dataset
+from overrides import overrides
 from requests import HTTPError
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate_fn_map
@@ -112,6 +118,24 @@ def get_image_urls(instance: Instance) -> Iterable[str]:
     url = instance.get("image_url") or instance["pos_url"]
     for image_url in re.findall(r"http\S+", url) or [url]:
         yield from get_imgur_urls_maybe(image_url)
+
+
+class FastHttpClient(HttpClient):
+    @overrides(check_signature=False)
+    def get_etag(self) -> str | None:
+        return None  # Don't do a head request to check if the resource was modified.
+
+    @overrides
+    def get_resource(self, temp_file: io.BufferedWriter) -> None:
+        with requests.Session() as session:  # No backoff.
+            response = session.get(self.resource, stream=True, timeout=30)  # Set a timeout
+            self.validate_response(response)
+            for chunk in response.iter_content(chunk_size=1024):
+                if chunk:  # Filter out keep-alive new chunks.
+                    temp_file.write(chunk)
+
+
+add_scheme_client(FastHttpClient)  # Override cached_path's default HTTP client to a faster one.
 
 
 def fetch_image(instance: Instance) -> Instance:
