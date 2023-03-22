@@ -121,7 +121,7 @@ def _parse_general_inq_file(path: FilePath = PATH_GENERAL_INQ) -> Mapping[str, C
         for word in data[class_name][1:].index:
             if not is_float(data[class_name][word]) and not is_bool(word):
                 dict_general[word.lower()].append(class_name)
-    print(f"Total # of General Inquirer classes:{len(dict_general.keys())}")
+    print("Total # of General Inquirer classes:", len(dict_general.keys()))
     return dict_general
 
 
