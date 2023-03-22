@@ -38,6 +38,7 @@ def parse_args() -> argparse.Namespace:
                         help="See options at https://huggingface.co/datasets?"
                              "task_categories=task_categories:image-to-text")
     parser.add_argument("--dataset-split", default="train")
+    parser.add_argument("--dataset-files")
     parser.add_argument("--dataset-streaming-mode", default="map", choices=["load", "map", "none"],
                         help="Streaming mode for the dataset. \"load\" means that the dataset is in streaming mode when"
                              " loaded, \"map\" means that the dataset is in streaming mode before any map function is"
@@ -151,7 +152,9 @@ def main() -> None:
     # at the data loading level. It should be more efficient this way.
     os.environ["TOKENIZERS_PARALLELISM"] = "0"
 
-    dataset = load_dataset(args.dataset, split=args.dataset_split, streaming=args.dataset_streaming_mode == "load",
+    data_files = {args.dataset_split: args.dataset_files} if args.dataset_files else None
+    dataset = load_dataset(args.dataset, split=args.dataset_split, data_files=data_files,
+                           streaming=args.dataset_streaming_mode == "load",
                            num_proc=None if args.dataset_streaming_mode == "load" else (args.num_workers or None))
     dataset = dataset.select_columns(["image_id", "caption", "image_url"])
 
