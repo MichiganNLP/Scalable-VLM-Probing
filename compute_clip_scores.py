@@ -17,7 +17,7 @@ import pandas as pd
 import torch
 from PIL import Image
 from cached_path import cached_path
-from datasets import IterableDataset, load_dataset
+from datasets import IterableDataset, concatenate_datasets, load_dataset
 from requests import HTTPError
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate_fn_map
@@ -70,6 +70,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--model-name-or-path", default="openai/clip-vit-large-patch14",
                         help="See options at https://huggingface.co/models?pipeline_tag=zero-shot-image-classification")
+
+    parser.add_argument("--do-random-pairings", action="store_true")
 
     parser.add_argument("--output-path", default="output.csv")
 
@@ -189,6 +191,12 @@ def main() -> None:
         else:
             dataset = dataset.select(range(num_examples))
 
+    if args.do_random_pairings:
+        image_url_key = "image_url" if "image_url" in next(iter(dataset)).keys() else "pos_url"
+        dataset_without_image_urls = dataset.remove_columns(image_url_key)
+        dataset_only_with_image_urls = dataset.select_columns(image_url_key).shuffle()
+        dataset = concatenate_datasets([dataset_without_image_urls, dataset_only_with_image_urls], axis=1)
+
     if args.dataset_streaming_mode == "map":
         dataset = dataset.to_iterable_dataset(num_shards=args.num_workers or 1)
 
@@ -223,6 +231,9 @@ def main() -> None:
                             for k in list(batch.keys())  # We need to copy the keys because we're modifying the dict.
                             if k in {"input_ids", "attention_mask", "pixel_values"}}
             batch["clip_score"] = compute_scores(model=model, batch=model_inputs).tolist()
+
+            # TODO: when computing random negative scores, we could take advantage of the batch and compute the scores
+            #    for all the pairs in the batch at once and get more data this way.
 
             batch = {k: v.tolist() if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
