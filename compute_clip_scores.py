@@ -132,8 +132,14 @@ def fetch_image(instance: Instance) -> Instance:
 
 def preprocess_data(processor: ProcessorMixin, instance: Instance) -> Instance:
     text = instance.get("caption") or instance["sentence"]
-    return processor(text=text, images=instance["image"], truncation=True,  # noqa
-                     padding=True, return_tensors="pt")
+    try:
+        return processor(text=text, images=instance["image"], truncation=True,  # noqa
+                         padding=True, return_tensors="pt")
+    except Exception as e:  # noqa
+        print("Unknown error while pre-processing the instance:", file=sys.stderr)
+        traceback.print_exc()
+        print("The instance will be skipped.")
+        return {}
 
 
 def get_non_collatable_columns(instance: Instance) -> Iterable[str]:
@@ -214,6 +220,7 @@ def main() -> None:
         preprocess_data_map_kwargs["desc"] = "Preprocessing the data"
     dataset = dataset.map(lambda instance: preprocess_data(processor, instance), batched=True,
                           batch_size=args.batch_size, remove_columns=["image"], **preprocess_data_map_kwargs)
+    dataset = dataset.filter(lambda instance: "pixel_values" in instance)
 
     dataset = dataset.remove_columns(list(get_non_collatable_columns(next(iter(dataset)))))
     data_loader = DataLoader(dataset, batch_size=args.batch_size, num_workers=args.num_workers,
