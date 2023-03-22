@@ -4,11 +4,7 @@ Probing CLIP on SVO-Probes.
 
 ## Setup
 
-First, download the data from
-[the Google Drive folder](https://drive.google.com/drive/folders/1Cs3sBmYzvXtTwPeDmkGgegdHqGTM08Ov?usp=sharing) into
-`data/`.
-
-Then, with Python >= 3.8, run the following commands:
+With Python >= 3.8, run the following commands:
 
 ```bash
 pip install -r requirements.txt
