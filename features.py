@@ -359,6 +359,8 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         df["words-common"] = df.apply(lambda row: _get_common_words(row.pos_triplet, row["neg-type"]), axis=1)
         df["words-common-pos"] = df["neg-type"].map(_get_common_words_pos)
     else:
+        # TODO: don't call them "words-common" if there are no negative features, it's confusing.
+        #   Maybe change it to "words-pos"?
         df["words-common"] = df.pos_triplet
         df["words-common-pos"] = [[_neg_type_to_pos(neg_type) for neg_type in VALID_NEG_TYPES]] * len(df)
 
