@@ -11,7 +11,6 @@ import random
 import re
 import sys
 import traceback
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Iterable, MutableMapping, Tuple
 
 import PIL
@@ -172,14 +171,6 @@ def fetch_image(instance: Instance) -> Instance:
     return {"image": fetch_image_from_url(instance["url"])}
 
 
-def fetch_images(batch: Instance) -> Instance:
-    any_value = next(iter(batch.values()))
-    batch_size = len(any_value)
-    with ThreadPoolExecutor(max_workers=batch_size) as executor:
-        batch["image"] = list(executor.map(fetch_image_from_url, batch["url"]))
-    return batch
-
-
 def preprocess_data(processor: ProcessorMixin, instance: Instance) -> Instance:
     text = instance.get("caption") or instance["sentence"]
     try:
@@ -289,7 +280,7 @@ def main() -> None:
     pre_processed_image_filter_kwargs = {}
     if not isinstance(dataset, IterableDataset):
         pre_processed_image_filter_kwargs["num_proc"] = args.num_workers or None
-        pre_processed_image_filter_kwargs["desc"] = "Filtering the instances to those with pre_processed images"
+        pre_processed_image_filter_kwargs["desc"] = "Filtering the instances to those with pre-processed images"
     dataset = dataset.filter(lambda instance: instance["pixel_values"] is not None,
                              **pre_processed_image_filter_kwargs)
 
