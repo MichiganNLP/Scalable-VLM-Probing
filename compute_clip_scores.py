@@ -301,7 +301,8 @@ def main() -> None:
     batches = []
 
     with torch.inference_mode():
-        for i, batch in enumerate(tqdm(data_loader, total=math.ceil(num_examples / args.batch_size))):
+        for i, batch in enumerate(tqdm(data_loader, total=math.ceil(num_examples / args.batch_size),
+                                       desc="Computing the scores")):
             model_inputs = {k: batch.pop(k).to(args.device)
                             for k in list(batch.keys())  # We need to copy the keys because we're modifying the dict.
                             if k in {"input_ids", "attention_mask", "pixel_values"}}
