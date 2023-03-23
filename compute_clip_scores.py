@@ -79,7 +79,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--do-random-pairings", action="store_true")
 
-    parser.add_argument("--output-path", default="output.csv")
+    parser.add_argument("--output-path", default="data/output.csv")
 
     parser.add_argument("--logging-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
 
@@ -141,17 +141,18 @@ add_scheme_client(FastHttpClient)  # Override cached_path's default HTTP client 
 def fetch_image(instance: Instance) -> Instance:
     image_url = next(iter(get_image_urls(instance)))
 
+    output = {}
+
     try:
-        image = Image.open(cached_path(image_url, quiet=True))
+        output["image"] = Image.open(cached_path(image_url, quiet=True))
     except (FileNotFoundError, HTTPError, PIL.UnidentifiedImageError):
-        image = None
+        pass
     except Exception as e:  # noqa
         print("Unknown error while fetching an image:", file=sys.stderr)
         traceback.print_exc()
         print("The image will be skipped.")
-        image = None
 
-    return {"image": image}
+    return output
 
 
 def preprocess_data(processor: ProcessorMixin, instance: Instance) -> Instance:
@@ -235,7 +236,7 @@ def main() -> None:
         fetch_image_map_kwargs["num_proc"] = args.num_workers or None
         fetch_image_map_kwargs["desc"] = "Downloading the images"
     dataset = dataset.map(fetch_image, **fetch_image_map_kwargs)
-    dataset = dataset.filter(lambda instance: instance["image"] is not None)
+    dataset = dataset.filter(lambda instance: "image" in instance)
 
     processor = AutoProcessor.from_pretrained(args.model_name_or_path)
     preprocess_data_map_kwargs = {}
