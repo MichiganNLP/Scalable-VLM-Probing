@@ -189,7 +189,8 @@ def preprocess_data(processor: ProcessorMixin, instance: Instance) -> Instance:
         print("Unknown error while pre-processing the instance:", file=sys.stderr)
         traceback.print_exc()
         print("The instance will be skipped.")
-        return {"input_ids": None, "attention_mask": None, "pixel_values": None}
+        placeholder = [None] * len(text)
+        return {"input_ids": placeholder, "attention_mask": placeholder, "pixel_values": placeholder}
 
 
 def get_non_collatable_columns(instance: Instance) -> Iterable[str]:
