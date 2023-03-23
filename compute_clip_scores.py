@@ -75,6 +75,8 @@ def parse_args() -> argparse.Namespace:
                         help="Number of workers used where parallelization is allowed. Zero means the default value"
                              " (generally it means running from the main thread).")
 
+    parser.add_argument("--fetch-image-threads-per-worker", type=int, default=4)
+
     parser.add_argument("--model-name-or-path", default="openai/clip-vit-large-patch14",
                         help="See options at https://huggingface.co/models?pipeline_tag=zero-shot-image-classification")
 
@@ -115,10 +117,22 @@ def get_imgur_urls_maybe(url: str) -> Iterable[str]:
         yield url
 
 
+def get_url_key_name(instance: Instance) -> str:
+    return "image_url" if "image_url" in instance else "pos_url"
+
+
+def get_urls(instance: Instance) -> str:
+    return instance[get_url_key_name(instance)]
+
+
 def get_image_urls(instance: Instance) -> Iterable[str]:
-    url = instance.get("image_url") or instance["pos_url"]
+    url = get_urls(instance)
     for image_url in re.findall(r"http\S+", url) or [url]:
         yield from get_imgur_urls_maybe(image_url)
+
+
+def get_first_image_url(instance: Instance) -> str:
+    return next(iter(get_image_urls(instance)))
 
 
 class FastHttpClient(HttpClient):
@@ -139,27 +153,27 @@ class FastHttpClient(HttpClient):
 add_scheme_client(FastHttpClient)  # Override cached_path's default HTTP client to a faster one.
 
 
-def fetch_image(instance: Instance) -> Instance:
-    image_url = next(iter(get_image_urls(instance)))
-
-    output = {}
-
+def fetch_image_from_url(image_url: str) -> Image.Image | None:
     try:
-        output["image"] = Image.open(cached_path(image_url, quiet=True))
+        return Image.open(cached_path(image_url, quiet=True))
     except (FileNotFoundError, HTTPError, PIL.UnidentifiedImageError):
-        pass
+        return None
     except Exception as e:  # noqa
         print("Unknown error while fetching an image:", file=sys.stderr)
         traceback.print_exc()
         print("The image will be skipped.")
+        return None
 
-    return output
+
+def fetch_image(instance: Instance) -> Instance:
+    return {"image": fetch_image_from_url(instance["url"])}
 
 
 def fetch_images(batch: Instance) -> Instance:
     any_value = next(iter(batch.values()))
-    with ThreadPoolExecutor(max_workers=len(any_value)) as executor:
-        batch["image"] = executor.map(fetch_image, batch)
+    batch_size = len(any_value)
+    with ThreadPoolExecutor(max_workers=batch_size) as executor:
+        batch["image"] = list(executor.map(fetch_image_from_url, batch["url"]))
     return batch
 
 
@@ -231,7 +245,7 @@ def main() -> None:
             dataset = dataset.select(range(num_examples))
 
     if args.do_random_pairings:
-        image_url_key = "image_url" if "image_url" in next(iter(dataset)).keys() else "pos_url"
+        image_url_key = get_url_key_name(next(iter(dataset)))
         dataset_without_image_urls = dataset.remove_columns(image_url_key)
         dataset_only_with_image_urls = dataset.select_columns(image_url_key).shuffle()
         dataset = concatenate_datasets([dataset_without_image_urls, dataset_only_with_image_urls], axis=1)
@@ -239,12 +253,19 @@ def main() -> None:
     if args.dataset_streaming_mode == "map":
         dataset = dataset.to_iterable_dataset(num_shards=args.num_workers or 1)
 
+    get_first_image_url_map_kwargs = {}
+    if not isinstance(dataset, IterableDataset):
+        get_first_image_url_map_kwargs["num_proc"] = args.num_workers or None
+        get_first_image_url_map_kwargs["desc"] = "Downloading the images"
+    dataset = dataset.map(lambda instance: {"url": get_first_image_url(instance)}, **get_first_image_url_map_kwargs)
+
     fetch_image_map_kwargs = {}
     if not isinstance(dataset, IterableDataset):
         fetch_image_map_kwargs["num_proc"] = args.num_workers or None
         fetch_image_map_kwargs["desc"] = "Downloading the images"
-    dataset = dataset.map(fetch_image, **fetch_image_map_kwargs)
-    dataset = dataset.filter(lambda instance: "image" in instance)
+    dataset = dataset.map(fetch_images, batched=True, batch_size=args.fetch_image_threads_per_worker,
+                          **fetch_image_map_kwargs)
+    dataset = dataset.filter(lambda instance: instance["image"] is not None)
 
     processor = AutoProcessor.from_pretrained(args.model_name_or_path)
     preprocess_data_map_kwargs = {}
