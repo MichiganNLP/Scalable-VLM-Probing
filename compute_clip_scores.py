@@ -11,6 +11,7 @@ import random
 import re
 import sys
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Iterable, MutableMapping, Tuple
 
 import PIL
@@ -153,6 +154,13 @@ def fetch_image(instance: Instance) -> Instance:
         print("The image will be skipped.")
 
     return output
+
+
+def fetch_images(batch: Instance) -> Instance:
+    any_value = next(iter(batch.values()))
+    with ThreadPoolExecutor(max_workers=len(any_value)) as executor:
+        batch["image"] = executor.map(fetch_image, batch)
+    return batch
 
 
 def preprocess_data(processor: ProcessorMixin, instance: Instance) -> Instance:
