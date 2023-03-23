@@ -227,13 +227,11 @@ def main() -> None:
                            streaming=args.dataset_streaming_mode == "load",
                            num_proc=None if args.dataset_streaming_mode == "load" else (args.num_workers or None))
 
-    num_examples = dataset.info.splits[args.dataset_split].num_examples
-
     if args.shuffle:
         dataset = dataset.shuffle()
 
     if args.max_examples:
-        num_examples = min(args.max_examples, num_examples)
+        num_examples = min(args.max_examples, dataset.info.splits[args.dataset_split].num_examples)
         if isinstance(dataset, IterableDataset):
             dataset = dataset.take(num_examples)
         else:
@@ -295,6 +293,7 @@ def main() -> None:
     batches = []
 
     with torch.inference_mode():
+        num_examples = dataset.info.splits[args.dataset_split].num_examples
         for i, batch in enumerate(tqdm(data_loader, total=math.ceil(num_examples / args.batch_size),
                                        desc="Computing the scores")):
             model_inputs = {k: batch.pop(k).to(args.device)
