@@ -77,7 +77,8 @@ def parse_args() -> argparse.Namespace:
                              " (generally it means running from the main thread).")
 
     parser.add_argument("--fetch-image-workers-per-compute-worker", type=int, default=64,
-                        help="Only applied if the dataset is not in streaming mode by when it reaches the data loader.")
+                        help="Only applied if the dataset is not in streaming mode by when it reaches the image"
+                             " downloading.")
 
     parser.add_argument("--model-name-or-path", default="openai/clip-vit-large-patch14",
                         help="See options at https://huggingface.co/models?pipeline_tag=zero-shot-image-classification")
@@ -188,7 +189,7 @@ def preprocess_data(processor: ProcessorMixin, instance: Instance) -> Instance:
         print("Unknown error while pre-processing the instance:", file=sys.stderr)
         traceback.print_exc()
         print("The instance will be skipped.")
-        return {}
+        return {"input_ids": None, "attention_mask": None, "pixel_values": None}
 
 
 def get_non_collatable_columns(instance: Instance) -> Iterable[str]:
@@ -288,7 +289,8 @@ def main() -> None:
     if not isinstance(dataset, IterableDataset):
         pre_processed_image_filter_kwargs["num_proc"] = args.num_workers or None
         pre_processed_image_filter_kwargs["desc"] = "Filtering the instances to those with pre_processed images"
-    dataset = dataset.filter(lambda instance: "pixel_values" in instance, **pre_processed_image_filter_kwargs)
+    dataset = dataset.filter(lambda instance: instance["pixel_values"] is not None,
+                             **pre_processed_image_filter_kwargs)
 
     dataset = dataset.remove_columns(list(get_non_collatable_columns(next(iter(dataset)))))
     data_loader = DataLoader(dataset, batch_size=args.batch_size, num_workers=args.num_workers,
