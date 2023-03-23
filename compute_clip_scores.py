@@ -49,7 +49,8 @@ def parse_args() -> argparse.Namespace:
                              "task_categories=task_categories:image-to-text")
     parser.add_argument("--dataset-split", default="train")
     parser.add_argument("--dataset-files")
-    parser.add_argument("--dataset-streaming-mode", default="map", choices=["load", "map", "none"],
+    parser.add_argument("--dataset-streaming-mode", default="after_image_download",
+                        choices=["load", "map", "after_image_download", "none"],
                         help="Streaming mode for the dataset. \"load\" means that the dataset is in streaming mode when"
                              " loaded, \"map\" means that the dataset is in streaming mode before any map function is"
                              " applied, and \"none\" means that the dataset is not in streaming mode.\n"
@@ -75,7 +76,8 @@ def parse_args() -> argparse.Namespace:
                         help="Number of workers used where parallelization is allowed. Zero means the default value"
                              " (generally it means running from the main thread).")
 
-    parser.add_argument("--fetch-image-threads-per-worker", type=int, default=4)
+    parser.add_argument("--fetch-image-workers-per-compute-worker", type=int, default=64,
+                        help="Only applied if the dataset is not in streaming mode by when it reaches the data loader.")
 
     parser.add_argument("--model-name-or-path", default="openai/clip-vit-large-patch14",
                         help="See options at https://huggingface.co/models?pipeline_tag=zero-shot-image-classification")
@@ -256,16 +258,23 @@ def main() -> None:
     get_first_image_url_map_kwargs = {}
     if not isinstance(dataset, IterableDataset):
         get_first_image_url_map_kwargs["num_proc"] = args.num_workers or None
-        get_first_image_url_map_kwargs["desc"] = "Downloading the images"
+        get_first_image_url_map_kwargs["desc"] = "Getting the first image URL"
     dataset = dataset.map(lambda instance: {"url": get_first_image_url(instance)}, **get_first_image_url_map_kwargs)
 
     fetch_image_map_kwargs = {}
     if not isinstance(dataset, IterableDataset):
-        fetch_image_map_kwargs["num_proc"] = args.num_workers or None
+        fetch_image_map_kwargs["num_proc"] = (args.num_workers * args.fetch_image_workers_per_compute_worker) or None
         fetch_image_map_kwargs["desc"] = "Downloading the images"
-    dataset = dataset.map(fetch_images, batched=True, batch_size=args.fetch_image_threads_per_worker,
-                          **fetch_image_map_kwargs)
-    dataset = dataset.filter(lambda instance: instance["image"] is not None)
+    dataset = dataset.map(fetch_image, **fetch_image_map_kwargs)
+
+    image_filter_kwargs = {}
+    if not isinstance(dataset, IterableDataset):
+        image_filter_kwargs["num_proc"] = args.num_workers or None
+        image_filter_kwargs["desc"] = "Filtering the instances to those with images"
+    dataset = dataset.filter(lambda instance: instance["image"] is not None, **image_filter_kwargs)
+
+    if args.dataset_streaming_mode == "after_image_download":
+        dataset = dataset.to_iterable_dataset(num_shards=args.num_workers or 1)
 
     processor = AutoProcessor.from_pretrained(args.model_name_or_path)
     preprocess_data_map_kwargs = {}
@@ -274,7 +283,12 @@ def main() -> None:
         preprocess_data_map_kwargs["desc"] = "Preprocessing the data"
     dataset = dataset.map(lambda instance: preprocess_data(processor, instance), batched=True,
                           batch_size=args.batch_size, remove_columns=["image"], **preprocess_data_map_kwargs)
-    dataset = dataset.filter(lambda instance: "pixel_values" in instance)
+
+    pre_processed_image_filter_kwargs = {}
+    if not isinstance(dataset, IterableDataset):
+        pre_processed_image_filter_kwargs["num_proc"] = args.num_workers or None
+        pre_processed_image_filter_kwargs["desc"] = "Filtering the instances to those with pre_processed images"
+    dataset = dataset.filter(lambda instance: "pixel_values" in instance, **pre_processed_image_filter_kwargs)
 
     dataset = dataset.remove_columns(list(get_non_collatable_columns(next(iter(dataset)))))
     data_loader = DataLoader(dataset, batch_size=args.batch_size, num_workers=args.num_workers,
