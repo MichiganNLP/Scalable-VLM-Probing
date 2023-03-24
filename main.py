@@ -21,7 +21,8 @@ from statsmodels.tools.tools import pinv_extended
 from tqdm.auto import tqdm
 
 from argparse_with_defaults import ArgumentParserWithDefaults
-from features import VALID_LEVIN_RETURN_MODES, is_feature_binary, is_feature_multi_label, is_feature_string, \
+from features import PATH_DATA_FOLDER, VALID_LEVIN_RETURN_MODES, is_feature_binary, is_feature_multi_label, \
+    is_feature_string, \
     load_features
 
 CLASSIFICATION_MODELS = {"dominance-score", "sklearn-clf"}
@@ -255,7 +256,7 @@ def compute_mean_diff_and_corr(features: pd.DataFrame, dependent_variable: pd.Se
 def parse_args() -> argparse.Namespace:
     parser = ArgumentParserWithDefaults()
     parser.add_argument("--model", default="mean-diff-and-corr", choices=MODELS)
-    parser.add_argument("--input-path", default="data/merged.csv")
+    parser.add_argument("--input-path", default=PATH_DATA_FOLDER / "merged.csv")
 
     parser.add_argument("--max-data-count", type=int)
     parser.add_argument("--debug", action="store_true")
