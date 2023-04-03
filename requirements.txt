@@ -5,7 +5,7 @@ matplotlib==3.7.1
 nltk==3.8.1
 numpy==1.24.2
 overrides==7.3.1
-pandas==1.5.3
+pandas==2.0.0
 pyarrow==11.0.0  # To read parquet files. Not sure if still needed if using `datasets`.
 requests==2.28.2
 scikit-learn==1.2.2
@@ -16,6 +16,6 @@ sklearn-pandas==2.2.0
 statsmodels==0.13.5
 torch==2.0.0
 tqdm==4.65.0
-transformers==4.27.2
+transformers==4.27.4
 word_forms==2.1.0
 xlrd==2.0.1  # To read the General Inquirer file.
