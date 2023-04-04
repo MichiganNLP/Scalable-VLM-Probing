@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import functools
 import itertools
+import os
 from collections import Counter
-from typing import Any, Collection, Iterable, Literal, Sequence, Tuple
+from multiprocessing import Pool
+from typing import Any, Collection, Iterator, Literal, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,8 +26,7 @@ from tqdm.auto import tqdm
 
 from argparse_with_defaults import ArgumentParserWithDefaults
 from features import PATH_DATA_FOLDER, VALID_LEVIN_RETURN_MODES, is_feature_binary, is_feature_multi_label, \
-    is_feature_string, \
-    load_features
+    is_feature_string, load_features
 
 CLASSIFICATION_MODELS = {"dominance-score", "sklearn-clf"}
 REGRESSION_MODELS = {"mean-diff-and-corr", "lasso", "ols", "ridge", "sklearn"}
@@ -43,8 +46,85 @@ def _value_contains_label(v: Any, label: str) -> bool:
         raise ValueError(f"Unexpected value type: {type(v)}")
 
 
+def _compute_feature_examples(feature_name: str, raw_features: pd.DataFrame, multi_label_features: Collection[str],
+                              max_word_count: int = 5, sample_size: int | None = None) -> Tuple[str, str, str]:
+    underscore_split = feature_name.split("_", maxsplit=1)
+    if (main_feature_name := underscore_split[0]) in multi_label_features:
+        if len(underscore_split) > 1:
+            label = underscore_split[1]
+        else:  # This can happen when only one label was kept from a multi-label feature.
+            label = raw_features[main_feature_name].iloc[0]
+
+        main_feature_name_prefix, word_type = main_feature_name.split("-", maxsplit=1)
+        if word_type in {"common", "common-0", "common-1", "common-2", "original", "replacement"}:
+            mask = raw_features[main_feature_name].map(lambda labels: _value_contains_label(labels, label))
+            rows_with_label = raw_features[mask]
+
+            if sample_size:
+                rows_with_label = rows_with_label.sample(min(sample_size, len(rows_with_label)))
+
+            if word_type == "common":
+                lists_of_words_with_label = rows_with_label.apply(
+                    lambda row: [w
+                                 for i, w in enumerate(row["words-common"])
+                                 if _value_contains_label(row[f"{main_feature_name_prefix}-common-{i}"], label)],
+                    axis=1)
+                # We could also use `lists_of_words_with_label.explode()`, but this is likely faster:
+                words = (w for word_iter in lists_of_words_with_label for w in word_iter)
+
+                lists_of_words_without_label = rows_with_label.apply(
+                    lambda row: [w
+                                 for i, w in enumerate(row["words-common"])
+                                 if not _value_contains_label(row[f"{main_feature_name_prefix}-common-{i}"],
+                                                              label)], axis=1)
+                # We could also use `lists_of_words_without_label.explode()`, but this is likely faster:
+                common_co_occurrence_words = (w for word_iter in lists_of_words_without_label for w in word_iter)
+
+                non_common_co_occurrence_words = itertools.chain(rows_with_label.get("word-original", []),
+                                                                 rows_with_label.get("word-replacement", []))
+            else:
+                word_feature_name_prefix = "word" + ("s" if word_type.startswith("common-") else "")
+                words = rows_with_label[f"{word_feature_name_prefix}-{word_type}"]
+                common_co_occurrence_words = (w
+                                              for other_word_type in
+                                              {"common-0", "common-1", "common-2"} - {word_type}
+                                              for w in rows_with_label.get(f"words-{other_word_type}", []))
+                non_common_co_occurrence_words = (w
+                                                  for other_word_type in {"original", "replacement"} - {word_type}
+                                                  for w in rows_with_label.get(f"word-{other_word_type}", []))
+
+            examples_str = ", ".join(f"{w} ({freq})" for w, freq in Counter(words).most_common(max_word_count))
+            common_co_occurrence_example_str = ", ".join(
+                f"{w} ({freq})" for w, freq in Counter(common_co_occurrence_words).most_common(max_word_count))
+            non_common_co_occurrence_example_str = ", ".join(
+                f"{w} ({freq})" for w, freq in Counter(non_common_co_occurrence_words).most_common(max_word_count))
+        else:
+            examples_str = ""
+            common_co_occurrence_example_str = ""
+            non_common_co_occurrence_example_str = ""
+    else:
+        examples_str = ""
+        common_co_occurrence_example_str = ""
+        non_common_co_occurrence_example_str = ""
+
+    return examples_str, common_co_occurrence_example_str, non_common_co_occurrence_example_str
+
+
+# From https://stackoverflow.com/a/34333710/1165181
+@contextlib.contextmanager
+def set_env(**kwargs) -> Iterator[None]:
+    """Temporarily set the environment variables."""
+    old_environ = dict(os.environ)
+    os.environ.update(kwargs)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(old_environ)
+
+
 def obtain_top_examples_and_co_occurrences(
-        feature_names: Iterable[str], raw_features: pd.DataFrame, max_word_count: int = 5,
+        feature_names: Sequence[str], raw_features: pd.DataFrame, max_word_count: int = 5,
         sample_size: int | None = None) -> Tuple[Sequence[str], Sequence[str], Sequence[str]]:
     multi_label_features = {main_name
                             for name in feature_names
@@ -52,73 +132,15 @@ def obtain_top_examples_and_co_occurrences(
                                 and (is_feature_multi_label(raw_features[main_name])
                                      or is_feature_string(raw_features[main_name])))}
 
-    examples = []
-    common_co_occurrence_examples = []
-    non_common_co_occurrence_examples = []
+    worker_func = functools.partial(_compute_feature_examples, raw_features=raw_features,
+                                    multi_label_features=multi_label_features,
+                                    max_word_count=max_word_count, sample_size=sample_size)
 
-    for feature_name in tqdm(feature_names, desc="Computing examples and co-occurrences"):
-        underscore_split = feature_name.split("_", maxsplit=1)
-        if (main_feature_name := underscore_split[0]) in multi_label_features:
-            if len(underscore_split) > 1:
-                label = underscore_split[1]
-            else:  # This can happen when only one label was kept from a multi-label feature.
-                label = raw_features[main_feature_name].iloc[0]
-
-            main_feature_name_prefix, word_type = main_feature_name.split("-", maxsplit=1)
-            if word_type in {"common", "common-0", "common-1", "common-2", "original", "replacement"}:
-                mask = raw_features[main_feature_name].map(lambda labels: _value_contains_label(labels, label))
-                rows_with_label = raw_features[mask]
-
-                if sample_size:
-                    rows_with_label = rows_with_label.sample(min(sample_size, len(rows_with_label)))
-
-                if word_type == "common":
-                    lists_of_words_with_label = rows_with_label.apply(
-                        lambda row: [w
-                                     for i, w in enumerate(row["words-common"])
-                                     if _value_contains_label(row[f"{main_feature_name_prefix}-common-{i}"], label)],
-                        axis=1)
-                    # We could also use `lists_of_words_with_label.explode()`, but this is likely faster:
-                    words = (w for word_iter in lists_of_words_with_label for w in word_iter)
-
-                    lists_of_words_without_label = rows_with_label.apply(
-                        lambda row: [w
-                                     for i, w in enumerate(row["words-common"])
-                                     if not _value_contains_label(row[f"{main_feature_name_prefix}-common-{i}"],
-                                                                  label)], axis=1)
-                    # We could also use `lists_of_words_without_label.explode()`, but this is likely faster:
-                    common_co_occurrence_words = (w for word_iter in lists_of_words_without_label for w in word_iter)
-
-                    non_common_co_occurrence_words = itertools.chain(rows_with_label.get("word-original", []),
-                                                                     rows_with_label.get("word-replacement", []))
-                else:
-                    word_feature_name_prefix = "word" + ("s" if word_type.startswith("common-") else "")
-                    words = rows_with_label[f"{word_feature_name_prefix}-{word_type}"]
-                    common_co_occurrence_words = (w
-                                                  for other_word_type in
-                                                  {"common-0", "common-1", "common-2"} - {word_type}
-                                                  for w in rows_with_label.get(f"words-{other_word_type}", []))
-                    non_common_co_occurrence_words = (w
-                                                      for other_word_type in {"original", "replacement"} - {word_type}
-                                                      for w in rows_with_label.get(f"word-{other_word_type}", []))
-
-                examples_str = ", ".join(f"{w} ({freq})" for w, freq in Counter(words).most_common(max_word_count))
-                common_co_occurrence_example_str = ", ".join(
-                    f"{w} ({freq})" for w, freq in Counter(common_co_occurrence_words).most_common(max_word_count))
-                non_common_co_occurrence_example_str = ", ".join(
-                    f"{w} ({freq})" for w, freq in Counter(non_common_co_occurrence_words).most_common(max_word_count))
-            else:
-                examples_str = ""
-                common_co_occurrence_example_str = ""
-                non_common_co_occurrence_example_str = ""
-        else:
-            examples_str = ""
-            common_co_occurrence_example_str = ""
-            non_common_co_occurrence_example_str = ""
-
-        examples.append(examples_str)
-        common_co_occurrence_examples.append(common_co_occurrence_example_str)
-        non_common_co_occurrence_examples.append(non_common_co_occurrence_example_str)
+    # Set this env var to avoid concurrency issues, even if not using `tokenizers`.
+    with set_env(TOKENIZERS_PARALLELISM="0"), Pool() as pool:
+        examples, common_co_occurrence_examples, non_common_co_occurrence_examples = zip(
+            *tqdm(pool.imap(worker_func, feature_names, chunksize=4), total=len(feature_names),
+                  desc="Computing examples and co-occurrences"))
 
     return examples, common_co_occurrence_examples, non_common_co_occurrence_examples
 
