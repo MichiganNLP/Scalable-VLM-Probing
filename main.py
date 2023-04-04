@@ -139,7 +139,7 @@ def obtain_top_examples_and_co_occurrences(
     # Set this env var to avoid concurrency issues, even if not using `tokenizers`.
     with set_env(TOKENIZERS_PARALLELISM="0"), Pool() as pool:
         examples, common_co_occurrence_examples, non_common_co_occurrence_examples = zip(
-            *tqdm(pool.imap(worker_func, feature_names, chunksize=4), total=len(feature_names),
+            *tqdm(pool.imap(worker_func, feature_names, chunksize=32), total=len(feature_names),
                   desc="Computing examples and co-occurrences"))
 
     return examples, common_co_occurrence_examples, non_common_co_occurrence_examples
