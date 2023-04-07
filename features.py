@@ -26,7 +26,9 @@ from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardSc
 from sklearn.utils.validation import check_is_fitted
 from sklearn_pandas import DataFrameMapper
 from statsmodels.stats.outliers_influence import variance_inflation_factor
-from tqdm.auto import trange
+from tqdm.auto import tqdm, trange
+
+from spacy_features import create_model
 
 NegType = Literal["s", "v", "o"]
 Pos = Literal["n", "v"]
@@ -50,6 +52,8 @@ text_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 stemmer = PorterStemmer()
 lemmatizer = WordNetLemmatizer()
+
+spacy_model = create_model()
 
 
 def _parse_triplets(triplets: str) -> Sequence[Triplet]:
@@ -448,6 +452,10 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
                 lambda row: _compute_path_similarity(row["word-original"], row["word-replacement"], row["neg-type"]),
                 axis=1)
             print(" ✓")
+
+    if "spacy" not in feature_deny_list:
+        docs = list(tqdm(spacy_model.pipe(df.sentence), total=len(df), desc="Parsing with spaCy"))
+        pass
 
     print("Feature computation done.")
 
