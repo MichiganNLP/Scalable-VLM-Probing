@@ -37,12 +37,19 @@ def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"]:
     'Past'
     >>> get_tense(get_first_sentence(spacy_model("A cat was hungry again.")))
     'Past'
+    >>> get_tense(get_first_sentence(spacy_model("They are going to jump the fence.")))
+    'Fut'
+    >>> get_tense(get_first_sentence(spacy_model("They are gonna jump the fence.")))
+    'Fut'
+    >>> get_tense(get_first_sentence(spacy_model("They are going to the cinema.")))
+    'Pres'
     """
     root = sent.root
-    if root_morphological_tenses := root.morph.get("Tense"):
-        return root_morphological_tenses[0]
-    elif any(t.text in {"'ll", "will"} and t.tag_ == "MD" for t in root.children):
+    if ((root.lower_ in {"going", "gon", "gon'"} and any(t.tag_ == "VB" and t.dep_ == "xcomp" for t in root.children))
+            or any(t.lower_ in {"'ll", "will"} and t.tag_ == "MD" for t in root.children)):
         return "Fut"
+    elif root_morphological_tenses := root.morph.get("Tense"):
+        return root_morphological_tenses[0]
     else:
         raise ValueError(f"Could not determine the time tense for '{sent}'")
 
