@@ -20,7 +20,8 @@ def get_sentence_count(doc: spacy.tokens.Doc) -> int:
 
 
 def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"]:
-    """Computes the tense of an English sentence.
+    """Computes the most likely tense of the event described by an English sentence. It's derived from the lexical,
+    morphological, and grammatical features.
 
     Examples
     ---
@@ -51,7 +52,7 @@ def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"]:
     elif root_morphological_tenses := root.morph.get("Tense"):
         return root_morphological_tenses[0]
     else:
-        raise ValueError(f"Could not determine the time tense for '{sent}'")
+        raise ValueError(f"Could not determine the tense for '{sent}'")
 
 
 def is_continuous(sent: spacy.tokens.Span) -> bool:
