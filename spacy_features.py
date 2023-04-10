@@ -1,5 +1,7 @@
 # This module can be a project available on GitHub and [spaCy Universe](https://spacy.io/universe).
 # People could use it from `sent._.[attr]`.
+from __future__ import annotations
+
 from typing import Literal
 
 import spacy.tokens
@@ -19,7 +21,7 @@ def get_sentence_count(doc: spacy.tokens.Doc) -> int:
     return sum(1 for _ in doc.sents)
 
 
-def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"]:
+def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"] | None:
     """Computes the most likely tense of the event described by an English sentence. It's derived from the lexical,
     morphological, and grammatical features.
 
@@ -51,8 +53,12 @@ def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"]:
         return "Fut"
     elif root_morphological_tenses := root.morph.get("Tense"):
         return root_morphological_tenses[0]
+    elif any(t.tag_ == "MD" and t.lower_ in {"can"} for t in root.children):
+        return "Pres"
+    elif root.pos_ == "NOUN" and any(t.tag_ == "VBG" for t in root.children):
+        return "Pres"
     else:
-        raise ValueError(f"Could not determine the tense for '{sent}'")
+        return None
 
 
 def is_continuous(sent: spacy.tokens.Span) -> bool:
@@ -75,5 +81,9 @@ def has_any_adjective(doc: spacy.tokens.Doc) -> bool:
     pass
 
 
-def get_root_tag(sent: spacy.tokens.Span) -> str:
+def has_any_adverb(doc: spacy.tokens.Doc) -> bool:
     pass
+
+
+def get_root_tag(sent: spacy.tokens.Span) -> str:
+    return sent.root.tag_
