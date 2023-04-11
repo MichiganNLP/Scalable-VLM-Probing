@@ -22,7 +22,8 @@ def get_sentence_count(doc: spacy.tokens.Doc) -> int:
 
 
 def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"] | None:
-    """Computes the grammatical tense of an English sentence.
+    """Computes the grammatical tense of an English sentence. If it's not a sentence (or if it can't determine the
+    tense), it returns `None`.
 
     Examples
     ---
@@ -68,17 +69,11 @@ def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"] | None:
         return "Fut"
     elif root_morphological_tenses := root.morph.get("Tense"):
         if root.tag_ == "VBN" or (root.tag_ == "VBG" and any(t.lower_ == "been" for t in root.lefts)):
-            if any(t.lower_ in {"have", "'ve"} for t in root.lefts):
-                return "Pres"
-            elif any(t.lower_ in {"had", "'d"} for t in root.lefts):
-                return "Past"
-            else:
-                return root_morphological_tenses[0]
-        else:
-            return root_morphological_tenses[0]
+            if ((have := next((t for t in root.lefts if t.lemma_ in {"have", "'d", "'ve"}), None))
+                    and (have_token_morphological_tense := have.morph.get("Tense"))):
+                return have_token_morphological_tense[0]  # noqa
+        return root_morphological_tenses[0]
     elif any(t.tag_ == "MD" and t.lower_ in {"can"} for t in root.lefts):
-        return "Pres"
-    elif root.pos_ == "NOUN" and any(t.tag_ == "VBG" for t in root.lefts):
         return "Pres"
     else:
         return None
