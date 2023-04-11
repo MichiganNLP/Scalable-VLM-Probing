@@ -30,6 +30,16 @@ def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"] | None:
     >>> spacy_model = create_model()
     >>> get_tense(get_first_sentence(spacy_model("The man runs in the forest.")))
     'Pres'
+    >>> get_tense(get_first_sentence(spacy_model("The man is running again.")))
+    'Pres'
+    >>> get_tense(get_first_sentence(spacy_model("I'm walking on sunshine.")))
+    'Pres'
+    >>> get_tense(get_first_sentence(spacy_model("I was walking yesterday.")))
+    'Past'
+    >>> get_tense(get_first_sentence(spacy_model("I will be arriving next week.")))
+    'Fut'
+    >>> get_tense(get_first_sentence(spacy_model("I'll be arriving next week.")))
+    'Fut'
     >>> get_tense(get_first_sentence(spacy_model("The dogs will walk.")))
     'Fut'
     >>> get_tense(get_first_sentence(spacy_model("She'll teach the class.")))
@@ -79,19 +89,70 @@ def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"] | None:
         return None
 
 
-def is_continuous(sent: spacy.tokens.Span) -> bool:
+def is_continuous(sent: spacy.tokens.Span) -> bool | None:
+    """Computes the continuous grammatical aspect of an English sentence. If it's not a sentence (or if it can't
+    determine the tense), it returns `None`.
+
+    Examples
+    ---
+    >>> spacy_model = create_model()
+    >>> is_continuous(get_first_sentence(spacy_model("The man runs in the forest.")))
+    False
+    >>> is_continuous(get_first_sentence(spacy_model("The man is running again.")))
+    True
+    >>> is_continuous(get_first_sentence(spacy_model("I'm walking on sunshine.")))
+    True
+    >>> is_continuous(get_first_sentence(spacy_model("I was walking yesterday.")))
+    True
+    >>> is_continuous(get_first_sentence(spacy_model("I will be arriving next week.")))
+    True
+    >>> is_continuous(get_first_sentence(spacy_model("I'll be arriving next week.")))
+    True
+    >>> is_continuous(get_first_sentence(spacy_model("The dogs will walk.")))
+    False
+    >>> is_continuous(get_first_sentence(spacy_model("She'll teach the class.")))
+    False
+    >>> is_continuous(get_first_sentence(spacy_model("I'll always love you.")))
+    False
+    >>> is_continuous(get_first_sentence(spacy_model("I left already.")))
+    False
+    >>> is_continuous(get_first_sentence(spacy_model("A cat was hungry again.")))
+    False
+    >>> is_continuous(get_first_sentence(spacy_model("They are going to jump the fence.")))
+    False
+    >>> is_continuous(get_first_sentence(spacy_model("They are gonna jump the fence.")))
+    False
+    >>> is_continuous(get_first_sentence(spacy_model("They are going to the cinema.")))
+    False
+    >>> is_continuous(get_first_sentence(spacy_model("They have gone to the cinema.")))
+    False
+    >>> is_continuous(get_first_sentence(spacy_model("They've gone to the cinema.")))
+    False
+    >>> is_continuous(get_first_sentence(spacy_model("They have been going to the cinema.")))
+    True
+    >>> is_continuous(get_first_sentence(spacy_model("They had gone to the cinema.")))
+    False
+    >>> is_continuous(get_first_sentence(spacy_model("They'd gone to the cinema.")))
+    False
+    >>> is_continuous(get_first_sentence(spacy_model("They had been going to the cinema.")))
+    True
+    >>> is_continuous(get_first_sentence(spacy_model("They will have gone to the cinema.")))
+    False
+    >>> is_continuous(get_first_sentence(spacy_model("They will have been going to the cinema.")))
+    True
+    """
+    return (sent.root.morph.get("Aspect") or ["Hab"])[0] == "Prog"
+
+
+def is_perfect(sent: spacy.tokens.Span) -> bool | None:
     pass
 
 
-def is_perfect(sent: spacy.tokens.Span) -> bool:
+def get_person(sent: spacy.tokens.Span) -> Literal["1", "2", "3"] | None:
     pass
 
 
-def is_person(sent: spacy.tokens.Span) -> Literal[1, 2, 3]:
-    pass
-
-
-def is_plural(sent: spacy.tokens.Span) -> bool:
+def is_plural(sent: spacy.tokens.Span) -> bool | None:
     pass
 
 
