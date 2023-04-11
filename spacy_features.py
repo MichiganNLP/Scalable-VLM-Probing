@@ -123,7 +123,7 @@ def is_continuous(sent: spacy.tokens.Span) -> bool | None:
     >>> is_continuous(get_first_sentence(spacy_model("They are gonna jump the fence.")))
     False
     >>> is_continuous(get_first_sentence(spacy_model("They are going to the cinema.")))
-    False
+    True
     >>> is_continuous(get_first_sentence(spacy_model("They have gone to the cinema.")))
     False
     >>> is_continuous(get_first_sentence(spacy_model("They've gone to the cinema.")))
