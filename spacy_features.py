@@ -22,8 +22,7 @@ def get_sentence_count(doc: spacy.tokens.Doc) -> int:
 
 
 def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"] | None:
-    """Computes the most likely tense of the event described by an English sentence. It's derived from the lexical,
-    morphological, and grammatical features.
+    """Computes the grammatical tense of an English sentence.
 
     Examples
     ---
@@ -46,16 +45,40 @@ def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"] | None:
     'Fut'
     >>> get_tense(get_first_sentence(spacy_model("They are going to the cinema.")))
     'Pres'
+    >>> get_tense(get_first_sentence(spacy_model("They have gone to the cinema.")))
+    'Pres'
+    >>> get_tense(get_first_sentence(spacy_model("They've gone to the cinema.")))
+    'Pres'
+    >>> get_tense(get_first_sentence(spacy_model("They have been going to the cinema.")))
+    'Pres'
+    >>> get_tense(get_first_sentence(spacy_model("They had gone to the cinema.")))
+    'Past'
+    >>> get_tense(get_first_sentence(spacy_model("They'd gone to the cinema.")))
+    'Past'
+    >>> get_tense(get_first_sentence(spacy_model("They had been going to the cinema.")))
+    'Past'
+    >>> get_tense(get_first_sentence(spacy_model("They will have gone to the cinema.")))
+    'Fut'
+    >>> get_tense(get_first_sentence(spacy_model("They will have been going to the cinema.")))
+    'Fut'
     """
     root = sent.root
-    if ((root.lower_ in {"going", "gon", "gon'"} and any(t.tag_ == "VB" and t.dep_ == "xcomp" for t in root.children))
-            or any(t.lower_ in {"'ll", "will"} and t.tag_ == "MD" for t in root.children)):
+    if ((root.lower_ in {"going", "gon", "gon'"} and any(t.tag_ == "VB" and t.dep_ == "xcomp" for t in root.rights))
+            or any(t.lower_ in {"'ll", "will"} and t.tag_ == "MD" for t in root.lefts)):
         return "Fut"
     elif root_morphological_tenses := root.morph.get("Tense"):
-        return root_morphological_tenses[0]
-    elif any(t.tag_ == "MD" and t.lower_ in {"can"} for t in root.children):
+        if root.tag_ == "VBN" or (root.tag_ == "VBG" and any(t.lower_ == "been" for t in root.lefts)):
+            if any(t.lower_ in {"have", "'ve"} for t in root.lefts):
+                return "Pres"
+            elif any(t.lower_ in {"had", "'d"} for t in root.lefts):
+                return "Past"
+            else:
+                return root_morphological_tenses[0]
+        else:
+            return root_morphological_tenses[0]
+    elif any(t.tag_ == "MD" and t.lower_ in {"can"} for t in root.lefts):
         return "Pres"
-    elif root.pos_ == "NOUN" and any(t.tag_ == "VBG" for t in root.children):
+    elif root.pos_ == "NOUN" and any(t.tag_ == "VBG" for t in root.lefts):
         return "Pres"
     else:
         return None
