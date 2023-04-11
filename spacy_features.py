@@ -145,7 +145,12 @@ def is_continuous(sent: spacy.tokens.Span) -> bool | None:
     >>> is_continuous(get_first_sentence(spacy_model("They will have been going to the cinema.")))
     True
     """
-    return (sent.root.morph.get("Aspect") or ["Hab"])[0] == "Prog"
+    root = sent.root
+    if (root.lower_ in {"going", "gon", "gon'"}
+            and (verb := next((t for t in root.rights if t.tag_ == "VB" and t.dep_ == "xcomp"), None))):
+        root = verb
+
+    return (root.morph.get("Aspect") or ["Hab"])[0] == "Prog"
 
 
 def is_perfect(sent: spacy.tokens.Span) -> bool | None:
