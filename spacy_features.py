@@ -77,11 +77,15 @@ def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"] | None:
     if ((root.lower_ in {"going", "gon", "gon'"} and any(t.tag_ == "VB" and t.dep_ == "xcomp" for t in root.rights))
             or any(t.lower_ in {"'ll", "will"} and t.tag_ == "MD" for t in root.lefts)):
         return "Fut"
+    elif ((root.tag_ == "VBN" or (root.tag_ == "VBG" and any(t.lower_ == "been" for t in root.lefts)))
+          and (have := next((t for t in root.lefts if t.lemma_ in {"have", "'d", "'ve"}), None))
+          and (have_token_morphological_tense := have.morph.get("Tense"))):
+        return have_token_morphological_tense[0]  # noqa
+    elif ((be := next((t for t in root.lefts if t.lemma_ == "be" and t.dep_ == "aux"), None))
+          and (be.morph.get("VerbForm") or [""])[0] == "Fin"
+          and (be_morphological_tense := be.morph.get("Tense"))):
+        return be_morphological_tense[0]  # noqa
     elif root_morphological_tenses := root.morph.get("Tense"):
-        if root.tag_ == "VBN" or (root.tag_ == "VBG" and any(t.lower_ == "been" for t in root.lefts)):
-            if ((have := next((t for t in root.lefts if t.lemma_ in {"have", "'d", "'ve"}), None))
-                    and (have_token_morphological_tense := have.morph.get("Tense"))):
-                return have_token_morphological_tense[0]  # noqa
         return root_morphological_tenses[0]
     elif any(t.tag_ == "MD" and t.lower_ in {"can"} for t in root.lefts):
         return "Pres"
