@@ -157,7 +157,7 @@ def is_continuous(sent: spacy.tokens.Span) -> bool:
 
 def is_perfect(sent: spacy.tokens.Span) -> bool:
     """Computes the perfect grammatical aspect of an English sentence. If it's not a sentence (or if it can't
-    determine the tense), it returns `False`.
+    determine it), it returns `False`.
 
     Examples
     ---
@@ -215,7 +215,7 @@ def is_perfect(sent: spacy.tokens.Span) -> bool:
 
 def get_subject_person(sent: spacy.tokens.Span) -> Literal["1", "2", "3"] | None:
     """Computes the subject person of an English sentence. If it's not a sentence (or if it can't
-    determine the tense), it returns `None`.
+    determine it), it returns `None`.
 
     Examples
     ---
@@ -282,7 +282,71 @@ def get_subject_person(sent: spacy.tokens.Span) -> Literal["1", "2", "3"] | None
 
 
 def is_subject_plural(sent: spacy.tokens.Span) -> bool | None:
-    pass
+    """Computes if the subject is plural in an English sentence. If it's not a sentence (or if it can't
+    determine it), it returns `None`.
+
+    Examples
+    ---
+    >>> spacy_model = create_model()
+    >>> is_subject_plural(get_first_sentence(spacy_model("The man runs in the forest.")))
+    False
+    >>> is_subject_plural(get_first_sentence(spacy_model("The man is running again.")))
+    False
+    >>> is_subject_plural(get_first_sentence(spacy_model("I'm walking on sunshine.")))
+    False
+    >>> is_subject_plural(get_first_sentence(spacy_model("I was walking yesterday.")))
+    False
+    >>> is_subject_plural(get_first_sentence(spacy_model("I will be arriving next week.")))
+    False
+    >>> is_subject_plural(get_first_sentence(spacy_model("I'll be arriving next week.")))
+    False
+    >>> # is_subject_plural(get_first_sentence(spacy_model("The dogs will walk.")))  # It fails.
+    >>> is_subject_plural(get_first_sentence(spacy_model("She'll teach the class.")))
+    False
+    >>> is_subject_plural(get_first_sentence(spacy_model("I'll always love you.")))
+    False
+    >>> is_subject_plural(get_first_sentence(spacy_model("I left already.")))
+    False
+    >>> is_subject_plural(get_first_sentence(spacy_model("A cat was hungry again.")))
+    False
+    >>> is_subject_plural(get_first_sentence(spacy_model("They are going to jump the fence.")))
+    True
+    >>> is_subject_plural(get_first_sentence(spacy_model("They are gonna jump the fence.")))
+    True
+    >>> is_subject_plural(get_first_sentence(spacy_model("They are going to the cinema.")))
+    True
+    >>> is_subject_plural(get_first_sentence(spacy_model("They have gone to the cinema.")))
+    True
+    >>> is_subject_plural(get_first_sentence(spacy_model("They've gone to the cinema.")))
+    True
+    >>> is_subject_plural(get_first_sentence(spacy_model("They have been going to the cinema.")))
+    True
+    >>> is_subject_plural(get_first_sentence(spacy_model("They had gone to the cinema.")))
+    True
+    >>> is_subject_plural(get_first_sentence(spacy_model("They'd gone to the cinema.")))
+    True
+    >>> is_subject_plural(get_first_sentence(spacy_model("They had been going to the cinema.")))
+    True
+    >>> is_subject_plural(get_first_sentence(spacy_model("They will have gone to the cinema.")))
+    True
+    >>> is_subject_plural(get_first_sentence(spacy_model("They will have been going to the cinema.")))
+    True
+    >>> is_subject_plural(get_first_sentence(spacy_model("They would have been going to the cinema.")))
+    True
+    >>> is_subject_plural(get_first_sentence(spacy_model("We'll get there.")))
+    True
+    """
+    root = sent.root
+    if root_morphological_person := root.morph.get("Number"):
+        return root_morphological_person[0] == "Plur"
+    elif ((subj := next((t for t in sent.root.children if t.dep_ == "nsubj"), None))
+            and (subj_morphological_person := subj.morph.get("Number"))):
+        return subj_morphological_person[0] == "Plur"
+    elif ((aux := next((t for t in sent.root.children if t.dep_ == "aux"), None))
+            and (aux_morphological_person := aux.morph.get("Number"))):
+        return aux_morphological_person[0] == "Plur"
+    else:
+        return None
 
 
 def has_any_adjective(doc: spacy.tokens.Doc) -> bool:
