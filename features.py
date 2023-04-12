@@ -29,9 +29,8 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 from tqdm.auto import tqdm, trange
 
 from spacy_features import create_model, get_first_sentence, get_root_pos, get_root_tag, get_sentence_count, \
-    get_subject_person, \
-    get_tense, \
-    has_any_adjective, has_any_adverb, has_any_gerund, is_continuous, is_passive_voice, is_perfect, is_subject_plural
+    get_subject_number, get_subject_person, get_tense, has_any_adjective, has_any_adverb, has_any_gerund, \
+    is_continuous, is_passive_voice, is_perfect
 
 NegType = Literal["s", "v", "o"]
 Pos = Literal["n", "v"]
@@ -469,10 +468,10 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         df["is_continuous"] = [is_continuous(sent) for sent in first_sentences]
         df["is_perfect"] = [is_perfect(sent) for sent in first_sentences]
         df["subject_person"] = [get_subject_person(sent) for sent in first_sentences]
-        df["is_subject_plural"] = [is_subject_plural(sent) for sent in first_sentences]
+        df["subject_number"] = [get_subject_number(sent) for sent in first_sentences]
         df["is_passive_voice"] = [is_passive_voice(sent) for sent in first_sentences]
-        df["get_root_tag"] = [get_root_tag(sent) for sent in first_sentences]
-        df["get_root_pos"] = [get_root_pos(sent) for sent in first_sentences]
+        df["root_tag"] = [get_root_tag(sent) for sent in first_sentences]
+        df["root_pos"] = [get_root_pos(sent) for sent in first_sentences]
 
     print("Feature computation done.")
 
