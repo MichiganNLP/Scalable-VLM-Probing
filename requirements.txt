@@ -12,7 +12,7 @@ scipy==1.10.1
 seaborn==0.12.2
 sentence-transformers==2.2.2
 sklearn-pandas==2.2.0
-spacy[cuda11x,transformers]==3.5.1
+spacy[cuda11x,transformers]==3.5.2
 statsmodels==0.13.5
 torch==2.0.0
 tqdm==4.65.0

@@ -93,7 +93,7 @@ def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"] | None:
         return None
 
 
-def is_continuous(sent: spacy.tokens.Span) -> bool | None:
+def is_continuous(sent: spacy.tokens.Span) -> bool:
     """Computes the continuous grammatical aspect of an English sentence. If it's not a sentence (or if it can't
     determine the tense), it returns `None`.
 
@@ -157,11 +157,11 @@ def is_perfect(sent: spacy.tokens.Span) -> bool | None:
     pass
 
 
-def get_person(sent: spacy.tokens.Span) -> Literal["1", "2", "3"] | None:
+def get_subject_person(sent: spacy.tokens.Span) -> Literal["1", "2", "3"] | None:
     pass
 
 
-def is_plural(sent: spacy.tokens.Span) -> bool | None:
+def is_subject_plural(sent: spacy.tokens.Span) -> bool | None:
     pass
 
 
@@ -174,6 +174,10 @@ def has_any_gerund(doc: spacy.tokens.Doc) -> bool:
 
 
 def has_any_adverb(doc: spacy.tokens.Doc) -> bool:
+    pass
+
+
+def is_passive_voice(sent: spacy.tokens.Span) -> bool | None:
     pass
 
 
