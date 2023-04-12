@@ -361,8 +361,8 @@ def has_any_adverb(doc: spacy.tokens.Doc) -> bool:
     return any(t.pos_ == "ADV" for t in doc)
 
 
-def is_passive_voice(sent: spacy.tokens.Span) -> bool | None:
-    return any(t.lower_ == "be" for t in sent.root.lefts)
+def is_passive_voice(sent: spacy.tokens.Span) -> bool:
+    return any(t.dep_ == "auxpass" for t in sent.root.children)
 
 
 def get_root_tag(sent: spacy.tokens.Span) -> str:
