@@ -214,7 +214,71 @@ def is_perfect(sent: spacy.tokens.Span) -> bool:
 
 
 def get_subject_person(sent: spacy.tokens.Span) -> Literal["1", "2", "3"] | None:
-    pass
+    """Computes the subject person of an English sentence. If it's not a sentence (or if it can't
+    determine the tense), it returns `None`.
+
+    Examples
+    ---
+    >>> spacy_model = create_model()
+    >>> get_subject_person(get_first_sentence(spacy_model("The man runs in the forest.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("The man is running again.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("I'm walking on sunshine.")))
+    '1'
+    >>> get_subject_person(get_first_sentence(spacy_model("I was walking yesterday.")))
+    '1'
+    >>> get_subject_person(get_first_sentence(spacy_model("I will be arriving next week.")))
+    '1'
+    >>> get_subject_person(get_first_sentence(spacy_model("I'll be arriving next week.")))
+    '1'
+    >>> # get_subject_person(get_first_sentence(spacy_model("The dogs will walk.")))  # It fails.
+    >>> get_subject_person(get_first_sentence(spacy_model("She'll teach the class.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("I'll always love you.")))
+    '1'
+    >>> get_subject_person(get_first_sentence(spacy_model("I left already.")))
+    '1'
+    >>> get_subject_person(get_first_sentence(spacy_model("A cat was hungry again.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("They are going to jump the fence.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("They are gonna jump the fence.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("They are going to the cinema.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("They have gone to the cinema.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("They've gone to the cinema.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("They have been going to the cinema.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("They had gone to the cinema.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("They'd gone to the cinema.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("They had been going to the cinema.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("They will have gone to the cinema.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("They will have been going to the cinema.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("They would have been going to the cinema.")))
+    '3'
+    >>> get_subject_person(get_first_sentence(spacy_model("You'll get there.")))
+    '2'
+    """
+    root = sent.root
+    if root_morphological_person := root.morph.get("Person"):
+        return root_morphological_person[0]
+    elif ((subj := next((t for t in sent.root.children if t.dep_ == "nsubj"), None))
+            and (subj_morphological_person := subj.morph.get("Person"))):
+        return subj_morphological_person[0]  # noqa
+    elif ((aux := next((t for t in sent.root.children if t.dep_ == "aux"), None))
+            and (aux_morphological_person := aux.morph.get("Person"))):
+        return aux_morphological_person[0]  # noqa
+    else:
+        return None
 
 
 def is_subject_plural(sent: spacy.tokens.Span) -> bool | None:
@@ -222,19 +286,19 @@ def is_subject_plural(sent: spacy.tokens.Span) -> bool | None:
 
 
 def has_any_adjective(doc: spacy.tokens.Doc) -> bool:
-    pass
+    return any(t.pos_ == "ADJ" for t in doc)
 
 
 def has_any_gerund(doc: spacy.tokens.Doc) -> bool:
-    pass
+    return any(t.tag_ == "VBG" for t in doc)
 
 
 def has_any_adverb(doc: spacy.tokens.Doc) -> bool:
-    pass
+    return any(t.pos_ == "ADV" for t in doc)
 
 
 def is_passive_voice(sent: spacy.tokens.Span) -> bool | None:
-    pass
+    return any(t.lower_ == "be" for t in sent.root.lefts)
 
 
 def get_root_tag(sent: spacy.tokens.Span) -> str:

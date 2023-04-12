@@ -28,7 +28,10 @@ from sklearn_pandas import DataFrameMapper
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from tqdm.auto import tqdm, trange
 
-from spacy_features import create_model, get_first_sentence, get_tense, is_continuous
+from spacy_features import create_model, get_first_sentence, get_root_pos, get_root_tag, get_sentence_count, \
+    get_subject_person, \
+    get_tense, \
+    has_any_adjective, has_any_adverb, has_any_gerund, is_continuous, is_passive_voice, is_perfect, is_subject_plural
 
 NegType = Literal["s", "v", "o"]
 Pos = Literal["n", "v"]
@@ -455,9 +458,21 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
 
     if "spacy" not in feature_deny_list:
         docs = list(tqdm(spacy_model.pipe(df.sentence), total=len(df), desc="Parsing with spaCy"))
+
+        df["sentence_count"] = [get_sentence_count(doc) for doc in docs]
+        df["has_any_adjective"] = [has_any_adjective(doc) for doc in docs]
+        df["has_any_gerund"] = [has_any_gerund(doc) for doc in docs]
+        df["has_any_adverb"] = [has_any_adverb(doc) for doc in docs]
+
         first_sentences = [get_first_sentence(doc) for doc in docs]
         df["tense"] = [get_tense(sent) for sent in first_sentences]
         df["is_continuous"] = [is_continuous(sent) for sent in first_sentences]
+        df["is_perfect"] = [is_perfect(sent) for sent in first_sentences]
+        df["subject_person"] = [get_subject_person(sent) for sent in first_sentences]
+        df["is_subject_plural"] = [is_subject_plural(sent) for sent in first_sentences]
+        df["is_passive_voice"] = [is_passive_voice(sent) for sent in first_sentences]
+        df["get_root_tag"] = [get_root_tag(sent) for sent in first_sentences]
+        df["get_root_pos"] = [get_root_pos(sent) for sent in first_sentences]
 
     print("Feature computation done.")
 
