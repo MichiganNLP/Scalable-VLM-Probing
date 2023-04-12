@@ -28,9 +28,9 @@ from sklearn_pandas import DataFrameMapper
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from tqdm.auto import tqdm, trange
 
-from spacy_features import create_model, get_first_sentence, get_root_pos, get_root_tag, get_sentence_count, \
-    get_subject_number, get_subject_person, get_tense, has_any_adjective, has_any_adverb, has_any_gerund, \
-    is_continuous, is_passive_voice, is_perfect
+from spacy_features import create_model, get_first_sentence, get_noun_chunk_count, get_root_pos, get_root_tag, \
+    get_sentence_count, get_subject_number, get_subject_person, get_tense, has_any_adjective, has_any_adverb, \
+    has_any_gerund, is_continuous, is_passive_voice, is_perfect
 
 NegType = Literal["s", "v", "o"]
 Pos = Literal["n", "v"]
@@ -459,6 +459,7 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         docs = list(tqdm(spacy_model.pipe(df.sentence), total=len(df), desc="Parsing with spaCy"))
 
         df["sentence_count"] = [get_sentence_count(doc) for doc in docs]
+        df["noun_chunk_count"] = [get_noun_chunk_count(doc) for doc in docs]
         df["has_any_adjective"] = [has_any_adjective(doc) for doc in docs]
         df["has_any_gerund"] = [has_any_gerund(doc) for doc in docs]
         df["has_any_adverb"] = [has_any_adverb(doc) for doc in docs]

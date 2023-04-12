@@ -21,6 +21,10 @@ def get_sentence_count(doc: spacy.tokens.Doc) -> int:
     return sum(1 for _ in doc.sents)
 
 
+def get_noun_chunk_count(doc: spacy.tokens.Doc) -> int:
+    return sum(1 for _ in doc.noun_chunks)
+
+
 def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"] | None:
     """Computes the grammatical tense of an English sentence. If it's not a sentence (or if it can't determine the
     tense), it returns `None`.
