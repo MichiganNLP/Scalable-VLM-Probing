@@ -28,7 +28,7 @@ from sklearn_pandas import DataFrameMapper
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from tqdm.auto import tqdm, trange
 
-from spacy_features import create_model, get_first_sentence, get_tense
+from spacy_features import create_model, get_first_sentence, get_tense, is_continuous
 
 NegType = Literal["s", "v", "o"]
 Pos = Literal["n", "v"]
@@ -457,6 +457,7 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         docs = list(tqdm(spacy_model.pipe(df.sentence), total=len(df), desc="Parsing with spaCy"))
         first_sentences = [get_first_sentence(doc) for doc in docs]
         df["tense"] = [get_tense(sent) for sent in first_sentences]
+        df["is_continuous"] = [is_continuous(sent) for sent in first_sentences]
 
     print("Feature computation done.")
 

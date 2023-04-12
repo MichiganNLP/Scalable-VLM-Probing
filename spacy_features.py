@@ -169,9 +169,17 @@ def has_any_adjective(doc: spacy.tokens.Doc) -> bool:
     pass
 
 
+def has_any_gerund(doc: spacy.tokens.Doc) -> bool:
+    pass
+
+
 def has_any_adverb(doc: spacy.tokens.Doc) -> bool:
     pass
 
 
 def get_root_tag(sent: spacy.tokens.Span) -> str:
     return sent.root.tag_
+
+
+def get_root_pos(sent: spacy.tokens.Span) -> str:
+    return sent.root.pos_
