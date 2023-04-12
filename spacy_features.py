@@ -95,7 +95,7 @@ def get_tense(sent: spacy.tokens.Span) -> Literal["Past", "Pres", "Fut"] | None:
 
 def is_continuous(sent: spacy.tokens.Span) -> bool:
     """Computes the continuous grammatical aspect of an English sentence. If it's not a sentence (or if it can't
-    determine the tense), it returns `None`.
+    determine the tense), it returns `False`.
 
     Examples
     ---
@@ -144,6 +144,8 @@ def is_continuous(sent: spacy.tokens.Span) -> bool:
     False
     >>> is_continuous(get_first_sentence(spacy_model("They will have been going to the cinema.")))
     True
+    >>> is_continuous(get_first_sentence(spacy_model("They would have been going to the cinema.")))
+    True
     """
     root = sent.root
     if (root.lower_ in {"going", "gon", "gon'"}
@@ -153,8 +155,62 @@ def is_continuous(sent: spacy.tokens.Span) -> bool:
     return (root.morph.get("Aspect") or ["Hab"])[0] == "Prog"
 
 
-def is_perfect(sent: spacy.tokens.Span) -> bool | None:
-    pass
+def is_perfect(sent: spacy.tokens.Span) -> bool:
+    """Computes the perfect grammatical aspect of an English sentence. If it's not a sentence (or if it can't
+    determine the tense), it returns `False`.
+
+    Examples
+    ---
+    >>> spacy_model = create_model()
+    >>> is_perfect(get_first_sentence(spacy_model("The man runs in the forest.")))
+    False
+    >>> is_perfect(get_first_sentence(spacy_model("The man is running again.")))
+    False
+    >>> is_perfect(get_first_sentence(spacy_model("I'm walking on sunshine.")))
+    False
+    >>> is_perfect(get_first_sentence(spacy_model("I was walking yesterday.")))
+    False
+    >>> is_perfect(get_first_sentence(spacy_model("I will be arriving next week.")))
+    False
+    >>> is_perfect(get_first_sentence(spacy_model("I'll be arriving next week.")))
+    False
+    >>> is_perfect(get_first_sentence(spacy_model("The dogs will walk.")))
+    False
+    >>> is_perfect(get_first_sentence(spacy_model("She'll teach the class.")))
+    False
+    >>> is_perfect(get_first_sentence(spacy_model("I'll always love you.")))
+    False
+    >>> is_perfect(get_first_sentence(spacy_model("I left already.")))
+    False
+    >>> is_perfect(get_first_sentence(spacy_model("A cat was hungry again.")))
+    False
+    >>> is_perfect(get_first_sentence(spacy_model("They are going to jump the fence.")))
+    False
+    >>> is_perfect(get_first_sentence(spacy_model("They are gonna jump the fence.")))
+    False
+    >>> is_perfect(get_first_sentence(spacy_model("They are going to the cinema.")))
+    False
+    >>> is_perfect(get_first_sentence(spacy_model("They have gone to the cinema.")))
+    True
+    >>> is_perfect(get_first_sentence(spacy_model("They've gone to the cinema.")))
+    True
+    >>> is_perfect(get_first_sentence(spacy_model("They have been going to the cinema.")))
+    True
+    >>> is_perfect(get_first_sentence(spacy_model("They had gone to the cinema.")))
+    True
+    >>> # is_perfect(get_first_sentence(spacy_model("They'd gone to the cinema.")))  # Bug: it's parsed as "would".
+    >>> is_perfect(get_first_sentence(spacy_model("They had been going to the cinema.")))
+    True
+    >>> is_perfect(get_first_sentence(spacy_model("They will have gone to the cinema.")))
+    True
+    >>> is_perfect(get_first_sentence(spacy_model("They will have been going to the cinema.")))
+    True
+    >>> is_perfect(get_first_sentence(spacy_model("They would have been going to the cinema.")))
+    True
+    """
+    root = sent.root
+    return ((root.tag_ == "VBN" or (root.tag_ == "VBG" and any(t.lower_ == "been" for t in root.lefts)))
+            and any(t.lemma_ in {"have", "'d", "'ve"} for t in root.lefts))
 
 
 def get_subject_person(sent: spacy.tokens.Span) -> Literal["1", "2", "3"] | None:
