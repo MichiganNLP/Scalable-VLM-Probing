@@ -522,7 +522,6 @@ class SelectMinNonZero(SelectorMixin, BaseEstimator):
         self.leave_at_least_one = leave_at_least_one
 
     def fit(self, X: np.ndarray, y: np.ndarray | None = None) -> SelectMinNonZero:  # noqa
-        assert not np.issubdtype(X.dtype, np.floating)
         self.non_zero_counts_ = (X != 0).sum(axis=0)  # noqa
         if isinstance(self.non_zero_counts_, np.matrix):  # Can happen with CSR matrices.
             self.non_zero_counts_ = self.non_zero_counts_.A1  # noqa
@@ -536,7 +535,7 @@ class SelectMinNonZero(SelectorMixin, BaseEstimator):
             # We do this because, with sklearn-pandas, when we use a `MultiLabelBinarizer` (because they are
             # transformed one by one), there may be no features left afterward and the next transformers in the
             # pipeline may fail for that multi-label feature.
-            mask[np.argmax(self.non_zero_counts_)] = True
+            mask[self.non_zero_counts_.argmax()] = True
 
         return mask
 
@@ -554,14 +553,15 @@ def _infer_transformer(feature: np.ndarray | pd.Series, impute_missing_values: b
     elif is_feature_multi_label(feature):
         transformers = [MultiLabelBinarizer()]
 
-    if transformers is not None:
+    if is_feature_multi_label(feature) or is_feature_string(feature):
+        # We remove useless sub-features early. We can only possibly do this for features that produce sub-features
+        # because otherwise we wouldn't be able to remove the only feature available.
         transformers.append(VarianceThreshold())  # We remove the constant features.
-
-    if is_feature_binary(feature) or is_feature_multi_label(feature) or is_feature_string(feature):
         transformers.append(SelectMinNonZero(feature_min_non_zero_values))
 
-        if standardize_binary_features:
-            transformers.append(StandardScaler())
+    if (standardize_binary_features
+            and (is_feature_binary(feature) or is_feature_multi_label(feature) or is_feature_string(feature))):
+        transformers.append(StandardScaler())
 
     return transformers
 
@@ -620,6 +620,17 @@ def _transform_features_to_numbers(
     new_df = mapper.fit_transform(df)
     new_df = _fix_column_names(new_df, mapper)
     print(" ✓")
+
+    # We also remove useless features at a macro level:
+
+    new_df = VarianceThreshold().set_output(transform="pandas").fit_transform(new_df)
+
+    binarized_feature_names = [feature_name
+                               for feature_name in new_df.columns
+                               if is_feature_binary(new_df[feature_name])]
+    mapper2 = DataFrameMapper([(binarized_feature_names, SelectMinNonZero(feature_min_non_zero_values))],
+                              default=None, df_out=True)
+    new_df = mapper2.fit_transform(new_df)  # FIXME: column names are weird.
 
     if standardize_dependent_variable:
         dependent_variable = new_df.pop(dependent_variable_name)
