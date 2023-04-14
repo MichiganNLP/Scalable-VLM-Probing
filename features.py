@@ -19,6 +19,7 @@ from pandas._typing import FilePath
 from pandas.core.dtypes.inference import is_bool, is_float
 from sentence_transformers import SentenceTransformer, util
 from sklearn.base import BaseEstimator
+from sklearn.compose import make_column_selector, make_column_transformer
 from sklearn.feature_selection import SelectorMixin, VarianceThreshold
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
@@ -522,6 +523,7 @@ class SelectMinNonZero(SelectorMixin, BaseEstimator):
         self.leave_at_least_one = leave_at_least_one
 
     def fit(self, X: np.ndarray, y: np.ndarray | None = None) -> SelectMinNonZero:  # noqa
+        assert np.unique(X).size <= 2
         self.non_zero_counts_ = (X != 0).sum(axis=0)  # noqa
         if isinstance(self.non_zero_counts_, np.matrix):  # Can happen with CSR matrices.
             self.non_zero_counts_ = self.non_zero_counts_.A1  # noqa
@@ -551,7 +553,7 @@ def _infer_transformer(feature: np.ndarray | pd.Series, impute_missing_values: b
     elif is_feature_string(feature):
         transformers = [OneHotEncoder(dtype=bool, sparse_output=not standardize_binary_features)]
     elif is_feature_multi_label(feature):
-        transformers = [MultiLabelBinarizer()]
+        transformers = [MultiLabelBinarizer()]  # FIXME: ideally the output should be a bool, but it's an int.
 
     if is_feature_multi_label(feature) or is_feature_string(feature):
         # We remove useless sub-features early. We can only possibly do this for features that produce sub-features
@@ -622,15 +624,12 @@ def _transform_features_to_numbers(
     print(" ✓")
 
     # We also remove useless features at a macro level:
-
-    new_df = VarianceThreshold().set_output(transform="pandas").fit_transform(new_df)
-
-    binarized_feature_names = [feature_name
-                               for feature_name in new_df.columns
-                               if is_feature_binary(new_df[feature_name])]
-    mapper2 = DataFrameMapper([(binarized_feature_names, SelectMinNonZero(feature_min_non_zero_values))],
-                              default=None, df_out=True)
-    new_df = mapper2.fit_transform(new_df)  # FIXME: column names are weird.
+    # We know `int` is a binary feature because these come from multi-label binarizer, and all other that were
+    # previously ints were converted to floats because of the scaling (supposing it's scaled).
+    new_df = make_column_transformer(
+        (SelectMinNonZero(feature_min_non_zero_values), make_column_selector(dtype_include=[bool, int])),
+        (VarianceThreshold(), make_column_selector(dtype_exclude=[bool, int])),
+        n_jobs=-1, verbose_feature_names_out=False).set_output(transform="pandas").fit_transform(new_df)
 
     if standardize_dependent_variable:
         dependent_variable = new_df.pop(dependent_variable_name)

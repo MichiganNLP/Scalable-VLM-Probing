@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import functools
 import itertools
 import os
 from collections import Counter
 from multiprocessing import Pool
-from typing import Any, Collection, Iterator, Literal, Sequence, Tuple
+from typing import Any, Collection, Literal, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,6 +34,9 @@ MODELS = CLASSIFICATION_MODELS | REGRESSION_MODELS
 EXAMPLE_MODES = ["top", "sample", "disabled"]
 
 pd.options.display.float_format = "{:,.3f}".format
+
+# Set this env var to avoid concurrency issues, even if not using `tokenizers`.
+os.environ["TOKENIZERS_PARALLELISM"] = "0"
 
 
 def _value_contains_label(v: Any, label: str) -> bool:
@@ -110,19 +112,6 @@ def _compute_feature_examples(feature_name: str, raw_features: pd.DataFrame, mul
     return examples_str, common_co_occurrence_example_str, non_common_co_occurrence_example_str
 
 
-# From https://stackoverflow.com/a/34333710/1165181
-@contextlib.contextmanager
-def set_env(**kwargs) -> Iterator[None]:
-    """Temporarily set the environment variables."""
-    old_environ = dict(os.environ)
-    os.environ.update(kwargs)
-    try:
-        yield
-    finally:
-        os.environ.clear()
-        os.environ.update(old_environ)
-
-
 def obtain_top_examples_and_co_occurrences(
         feature_names: Sequence[str], raw_features: pd.DataFrame, max_word_count: int = 5,
         sample_size: int | None = None) -> Tuple[Sequence[str], Sequence[str], Sequence[str]]:
@@ -136,8 +125,7 @@ def obtain_top_examples_and_co_occurrences(
                                     multi_label_features=multi_label_features,
                                     max_word_count=max_word_count, sample_size=sample_size)
 
-    # Set this env var to avoid concurrency issues, even if not using `tokenizers`.
-    with set_env(TOKENIZERS_PARALLELISM="0"), Pool() as pool:
+    with Pool() as pool:
         examples, common_co_occurrence_examples, non_common_co_occurrence_examples = zip(
             *tqdm(pool.imap(worker_func, feature_names, chunksize=32), total=len(feature_names),
                   desc="Computing examples and co-occurrences"))
