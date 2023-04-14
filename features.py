@@ -459,21 +459,21 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
     if "spacy" not in feature_deny_list:
         docs = list(tqdm(spacy_model.pipe(df.sentence), total=len(df), desc="Parsing with spaCy"))
 
-        df["sentence_count"] = [get_sentence_count(doc) for doc in docs]
-        df["noun_chunk_count"] = [get_noun_chunk_count(doc) for doc in docs]
-        df["has_any_adjective"] = [has_any_adjective(doc) for doc in docs]
-        df["has_any_gerund"] = [has_any_gerund(doc) for doc in docs]
-        df["has_any_adverb"] = [has_any_adverb(doc) for doc in docs]
+        df["sentence count"] = [get_sentence_count(doc) for doc in docs]
+        df["noun chunk count"] = [get_noun_chunk_count(doc) for doc in docs]
+        df["has any adjective"] = [has_any_adjective(doc) for doc in docs]
+        df["has any gerund"] = [has_any_gerund(doc) for doc in docs]
+        df["has any adverb"] = [has_any_adverb(doc) for doc in docs]
 
         first_sentences = [get_first_sentence(doc) for doc in docs]
         df["tense"] = [get_tense(sent) for sent in first_sentences]
-        df["is_continuous"] = [is_continuous(sent) for sent in first_sentences]
-        df["is_perfect"] = [is_perfect(sent) for sent in first_sentences]
-        df["subject_person"] = [get_subject_person(sent) for sent in first_sentences]
-        df["subject_number"] = [get_subject_number(sent) for sent in first_sentences]
-        df["is_passive_voice"] = [is_passive_voice(sent) for sent in first_sentences]
-        df["root_tag"] = [get_root_tag(sent) for sent in first_sentences]
-        df["root_pos"] = [get_root_pos(sent) for sent in first_sentences]
+        df["is continuous"] = [is_continuous(sent) for sent in first_sentences]
+        df["is perfect"] = [is_perfect(sent) for sent in first_sentences]
+        df["subject person"] = [get_subject_person(sent) for sent in first_sentences]
+        df["subject number"] = [get_subject_number(sent) for sent in first_sentences]
+        df["is passive voice"] = [is_passive_voice(sent) for sent in first_sentences]
+        df["root tag"] = [get_root_tag(sent) for sent in first_sentences]
+        df["root pos"] = [get_root_pos(sent) for sent in first_sentences]
 
     print("Feature computation done.")
 
@@ -517,33 +517,34 @@ def _fix_column_names(df: pd.DataFrame, mapper: DataFrameMapper) -> pd.DataFrame
     return df
 
 
-class SelectMinNonZero(SelectorMixin, BaseEstimator):
-    def __init__(self, feature_min_non_zero_values: int = 50, leave_at_least_one: bool = True) -> None:
-        self.feature_min_non_zero_values = feature_min_non_zero_values
+class SelectMinBinaryUniqueValues(SelectorMixin, BaseEstimator):
+    def __init__(self, binary_feature_min_unique_values: int = 50, leave_at_least_one: bool = True) -> None:
+        self.binary_feature_min_unique_values = binary_feature_min_unique_values
         self.leave_at_least_one = leave_at_least_one
 
-    def fit(self, X: np.ndarray, y: np.ndarray | None = None) -> SelectMinNonZero:  # noqa
-        assert np.unique(X).size <= 2
-        self.non_zero_counts_ = (X != 0).sum(axis=0)  # noqa
-        if isinstance(self.non_zero_counts_, np.matrix):  # Can happen with CSR matrices.
-            self.non_zero_counts_ = self.non_zero_counts_.A1  # noqa
+    def fit(self, X: np.ndarray, y: np.ndarray | None = None) -> SelectMinBinaryUniqueValues:  # noqa
+        assert np.unique(X).size <= 2  # Only binary.
+        non_zero = (X != 0).sum(axis=0)  # For sparse arrays, it's efficient to check the non-zero elements.
+        self.min_counts_ = np.minimum(non_zero, X.shape[0] - non_zero)
+        if isinstance(self.min_counts_, np.matrix):  # Can happen with CSR matrices.
+            self.min_counts_ = self.min_counts_.A1  # noqa
         return self
 
     def _get_support_mask(self) -> np.ndarray:
         check_is_fitted(self)
-        mask = self.non_zero_counts_ >= self.feature_min_non_zero_values
+        mask = self.min_counts_ >= self.binary_feature_min_unique_values
 
         if self.leave_at_least_one and not mask.any():
             # We do this because, with sklearn-pandas, when we use a `MultiLabelBinarizer` (because they are
             # transformed one by one), there may be no features left afterward and the next transformers in the
             # pipeline may fail for that multi-label feature.
-            mask[self.non_zero_counts_.argmax()] = True
+            mask[self.min_counts_.argmax()] = True
 
         return mask
 
 
 def _infer_transformer(feature: np.ndarray | pd.Series, impute_missing_values: bool = True,
-                       standardize_binary_features: bool = True, feature_min_non_zero_values: int = 50) -> Any:
+                       standardize_binary_features: bool = True, feature_min_unique_values: int = 50) -> Any:
     transformers = None  # `None` in this context means to ignore the feature. Note it's different from `[]`.
 
     if is_feature_binary(feature):
@@ -559,7 +560,7 @@ def _infer_transformer(feature: np.ndarray | pd.Series, impute_missing_values: b
         # We remove useless sub-features early. We can only possibly do this for features that produce sub-features
         # because otherwise we wouldn't be able to remove the only feature available.
         transformers.append(VarianceThreshold())  # We remove the constant features.
-        transformers.append(SelectMinNonZero(feature_min_non_zero_values))
+        transformers.append(SelectMinBinaryUniqueValues(feature_min_unique_values))
 
     if (standardize_binary_features
             and (is_feature_binary(feature) or is_feature_multi_label(feature) or is_feature_string(feature))):
@@ -570,7 +571,7 @@ def _infer_transformer(feature: np.ndarray | pd.Series, impute_missing_values: b
 
 def _transform_features_to_numbers(
         df: pd.DataFrame, dependent_variable_name: str, standardize_dependent_variable: bool = True,
-        standardize_binary_features: bool = True, feature_min_non_zero_values: int = 50,
+        standardize_binary_features: bool = True, binary_feature_min_unique_values: int = 50,
         compute_neg_features: bool = True, merge_original_and_replacement_features: bool = True,
         add_constant_feature: bool = False, verbose: bool = True) -> Tuple[pd.DataFrame, pd.Series]:
     df = df.copy()
@@ -608,7 +609,7 @@ def _transform_features_to_numbers(
         impute_missing_values = column_name != dependent_variable_name
         if transformer := _infer_transformer(column, impute_missing_values=impute_missing_values,
                                              standardize_binary_features=standardize_binary_features,
-                                             feature_min_non_zero_values=feature_min_non_zero_values):
+                                             feature_min_unique_values=binary_feature_min_unique_values):
             selector = column_name if is_feature_multi_label(column) else [column_name]
             transformers.append((selector, transformer))
 
@@ -627,7 +628,7 @@ def _transform_features_to_numbers(
     # We know `int` is a binary feature because these come from multi-label binarizer, and all other that were
     # previously ints were converted to floats because of the scaling (supposing it's scaled).
     new_df = make_column_transformer(
-        (SelectMinNonZero(feature_min_non_zero_values), make_column_selector(dtype_include=[bool, int])),
+        (SelectMinBinaryUniqueValues(binary_feature_min_unique_values), make_column_selector(dtype_include=[bool, int])),
         (VarianceThreshold(), make_column_selector(dtype_exclude=[bool, int])),
         n_jobs=-1, verbose_feature_names_out=False).set_output(transform="pandas").fit_transform(new_df)
 
@@ -682,7 +683,7 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
                               compute_neg_features: bool = True, levin_return_mode: LevinReturnMode = "all",
                               compute_similarity_features: bool = True,
                               merge_original_and_replacement_features: bool = True,
-                              add_constant_feature: bool = False, feature_min_non_zero_values: int = 50,
+                              add_constant_feature: bool = False, binary_feature_min_unique_values: int = 50,
                               standardize_dependent_variable: bool = True, standardize_binary_features: bool = True,
                               verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     raw_features = _compute_features(clip_results, feature_deny_list=feature_deny_list,
@@ -692,7 +693,7 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
     features, dependent_variable = _transform_features_to_numbers(
         raw_features, dependent_variable_name, standardize_dependent_variable=standardize_dependent_variable,
         standardize_binary_features=standardize_binary_features,
-        feature_min_non_zero_values=feature_min_non_zero_values, compute_neg_features=compute_neg_features,
+        binary_feature_min_unique_values=binary_feature_min_unique_values, compute_neg_features=compute_neg_features,
         merge_original_and_replacement_features=merge_original_and_replacement_features,
         add_constant_feature=add_constant_feature, verbose=verbose)
 
@@ -705,7 +706,7 @@ def load_features(path: FilePath, dependent_variable_name: str, max_data_count: 
                   levin_return_mode: LevinReturnMode = "all", compute_similarity_features: bool = True,
                   merge_original_and_replacement_features: bool = True, add_constant_feature: bool = False,
                   remove_correlated_features: bool = True, feature_correlation_keep_threshold: float = .8,
-                  do_vif: bool = False, feature_min_non_zero_values: int = 50,
+                  do_vif: bool = False, binary_feature_min_unique_values: int = 50,
                   verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     clip_results = _load_clip_results(path)
     raw_features, features, dependent_variable = _compute_numeric_features(
@@ -714,7 +715,7 @@ def load_features(path: FilePath, dependent_variable_name: str, max_data_count: 
         standardize_binary_features=standardize_binary_features, compute_neg_features=compute_neg_features,
         levin_return_mode=levin_return_mode, compute_similarity_features=compute_similarity_features,
         merge_original_and_replacement_features=merge_original_and_replacement_features,
-        add_constant_feature=add_constant_feature, feature_min_non_zero_values=feature_min_non_zero_values,
+        add_constant_feature=add_constant_feature, binary_feature_min_unique_values=binary_feature_min_unique_values,
         verbose=verbose)
 
     if remove_correlated_features:
