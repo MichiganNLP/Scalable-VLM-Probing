@@ -57,7 +57,11 @@ def _compute_feature_examples(feature_name: str, raw_features: pd.DataFrame, mul
         else:  # This can happen when only one label was kept from a multi-label feature.
             label = raw_features[main_feature_name].iloc[0]
 
-        main_feature_name_prefix, word_type = main_feature_name.split("-", maxsplit=1)
+        if "-" in main_feature_name:
+            main_feature_name_prefix, word_type = main_feature_name.split("-", maxsplit=1)
+        else:
+            main_feature_name_prefix, word_type = None, None
+
         if word_type in {"common", "common-0", "common-1", "common-2", "original", "replacement"}:
             mask = raw_features[main_feature_name].map(lambda labels: _value_contains_label(labels, label))
             rows_with_label = raw_features[mask]
