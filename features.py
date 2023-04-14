@@ -3,11 +3,12 @@ from __future__ import annotations
 import ast
 import itertools
 import json
+import re
 import string
 import warnings
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Callable, Collection, Iterable, Literal, Mapping, MutableSequence, Sequence, Tuple, get_args
+from typing import Any, Callable, Collection, Iterable, Literal, Mapping, Sequence, Tuple, get_args
 
 import numpy as np
 import pandas as pd
@@ -18,17 +19,16 @@ from nltk.stem import PorterStemmer, WordNetLemmatizer
 from pandas._typing import FilePath
 from pandas.core.dtypes.inference import is_bool, is_float
 from sentence_transformers import SentenceTransformer, util
-from sklearn.base import BaseEstimator
 from sklearn.compose import make_column_selector, make_column_transformer
-from sklearn.feature_selection import SelectorMixin, VarianceThreshold
+from sklearn.feature_selection import VarianceThreshold
 from sklearn.impute import SimpleImputer
-from sklearn.pipeline import Pipeline
+from sklearn.pipeline import Pipeline, make_pipeline
 from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardScaler
-from sklearn.utils.validation import check_is_fitted
 from sklearn_pandas import DataFrameMapper
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from tqdm.auto import tqdm, trange
 
+from sklearn_util import SelectMinBinaryUniqueValues
 from spacy_features import create_model, get_first_sentence, get_noun_chunk_count, get_root_pos, get_root_tag, \
     get_sentence_count, get_subject_number, get_subject_person, get_tense, has_any_adjective, has_any_adverb, \
     has_any_gerund, is_continuous, is_passive_voice, is_perfect
@@ -517,32 +517,6 @@ def _fix_column_names(df: pd.DataFrame, mapper: DataFrameMapper) -> pd.DataFrame
     return df
 
 
-class SelectMinBinaryUniqueValues(SelectorMixin, BaseEstimator):
-    def __init__(self, binary_feature_min_unique_values: int = 50, leave_at_least_one: bool = True) -> None:
-        self.binary_feature_min_unique_values = binary_feature_min_unique_values
-        self.leave_at_least_one = leave_at_least_one
-
-    def fit(self, X: np.ndarray, y: np.ndarray | None = None) -> SelectMinBinaryUniqueValues:  # noqa
-        assert np.unique(X).size <= 2  # Only binary.
-        non_zero = (X != 0).sum(axis=0)  # For sparse arrays, it's efficient to check the non-zero elements.
-        self.min_counts_ = np.minimum(non_zero, X.shape[0] - non_zero)
-        if isinstance(self.min_counts_, np.matrix):  # Can happen with CSR matrices.
-            self.min_counts_ = self.min_counts_.A1  # noqa
-        return self
-
-    def _get_support_mask(self) -> np.ndarray:
-        check_is_fitted(self)
-        mask = self.min_counts_ >= self.binary_feature_min_unique_values
-
-        if self.leave_at_least_one and not mask.any():
-            # We do this because, with sklearn-pandas, when we use a `MultiLabelBinarizer` (because they are
-            # transformed one by one), there may be no features left afterward and the next transformers in the
-            # pipeline may fail for that multi-label feature.
-            mask[self.min_counts_.argmax()] = True
-
-        return mask
-
-
 def _infer_transformer(feature: np.ndarray | pd.Series, impute_missing_values: bool = True,
                        standardize_binary_features: bool = True, feature_min_unique_values: int = 50) -> Any:
     transformers = None  # `None` in this context means to ignore the feature. Note it's different from `[]`.
@@ -602,33 +576,47 @@ def _transform_features_to_numbers(
         print("Multi-label features ignored because they are constant:", empty_multi_label_feature_names)
         df = df.drop(columns=empty_multi_label_feature_names)
 
-    transformers: MutableSequence[Tuple] = []
+    # transformers: MutableSequence[Tuple] = []
+    #
+    # for column_name in df.columns:
+    #     column = df[column_name]
+    #     impute_missing_values = column_name != dependent_variable_name
+    #     if transformer := _infer_transformer(column, impute_missing_values=impute_missing_values,
+    #                                          standardize_binary_features=standardize_binary_features,
+    #                                          feature_min_unique_values=binary_feature_min_unique_values):
+    #         selector = column_name if is_feature_multi_label(column) else [column_name]
+    #         transformers.append((selector, transformer))
+    #
+    # considered_column_names = {c for t in transformers for c in (t[0] if isinstance(t[0], list) else [t[0]])}
+    # if ignored_column_names := set(df.columns) - considered_column_names:
+    #     print("Columns ignored because their type is unsupported:", ignored_column_names)
 
-    for column_name in df.columns:
-        column = df[column_name]
-        impute_missing_values = column_name != dependent_variable_name
-        if transformer := _infer_transformer(column, impute_missing_values=impute_missing_values,
-                                             standardize_binary_features=standardize_binary_features,
-                                             feature_min_unique_values=binary_feature_min_unique_values):
-            selector = column_name if is_feature_multi_label(column) else [column_name]
-            transformers.append((selector, transformer))
+    new_df = make_pipeline(
+        make_column_transformer(
+            (SimpleImputer(), make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*",
+                                                   dtype_include=np.number)),
+            (OneHotEncoder(dtype=bool, sparse_output=not standardize_binary_features),
+             [f for f in df.columns if is_feature_string(df[f])]),
+            (MultiLabelBinarizer(sparse_output=not standardize_binary_features),
+             [f for f in df.columns if is_feature_multi_label(df[f])]),
+            remainder="passthrough", n_jobs=-1, verbose_feature_names_out=False,
+        ),
+        memory=str(Path.home() / ".cache/probing-clip-transform"), verbose=verbose,
+    ).set_output(transform="pandas").fit_transform(df)
 
-    considered_column_names = {c for t in transformers for c in (t[0] if isinstance(t[0], list) else [t[0]])}
-    if ignored_column_names := set(df.columns) - considered_column_names:
-        print("Columns ignored because their type is unsupported:", ignored_column_names)
-
-    mapper = DataFrameMapper(transformers, df_out=True)
-
-    print("Transforming the features into numbers…", end="")
-    new_df = mapper.fit_transform(df)
-    new_df = _fix_column_names(new_df, mapper)
-    print(" ✓")
+    # mapper = DataFrameMapper(transformers, df_out=True)
+    #
+    # print("Transforming the features into numbers…", end="")
+    # new_df = mapper.fit_transform(df)
+    # new_df = _fix_column_names(new_df, mapper)
+    # print(" ✓")
 
     # We also remove useless features at a macro level:
     # We know `int` is a binary feature because these come from multi-label binarizer, and all other that were
     # previously ints were converted to floats because of the scaling (supposing it's scaled).
     new_df = make_column_transformer(
-        (SelectMinBinaryUniqueValues(binary_feature_min_unique_values), make_column_selector(dtype_include=[bool, int])),
+        (SelectMinBinaryUniqueValues(binary_feature_min_unique_values),
+         make_column_selector(dtype_include=[bool, int])),
         (VarianceThreshold(), make_column_selector(dtype_exclude=[bool, int])),
         n_jobs=-1, verbose_feature_names_out=False).set_output(transform="pandas").fit_transform(new_df)
 
