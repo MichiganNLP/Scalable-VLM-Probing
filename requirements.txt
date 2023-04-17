@@ -16,5 +16,5 @@ spacy[cuda11x,transformers]==3.5.2
 statsmodels==0.13.5
 torch==2.0.0
 tqdm==4.65.0
-transformers==4.26.1  # The one supported by spacy-transformers 1.2.2.
+transformers==4.28.1
 word_forms==2.1.0
