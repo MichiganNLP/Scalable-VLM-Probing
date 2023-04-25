@@ -28,7 +28,7 @@ from sklearn_pandas import DataFrameMapper
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from tqdm.auto import tqdm, trange
 
-from sklearn_util import SelectMinBinaryUniqueValues
+from sklearn_util import MultiHotEncoder, SelectMinBinaryUniqueValues
 from spacy_features import create_model, get_first_sentence, get_noun_chunk_count, get_root_pos, get_root_tag, \
     get_sentence_count, get_subject_number, get_subject_person, get_tense, has_any_adjective, has_any_adverb, \
     has_any_gerund, is_continuous, is_passive_voice, is_perfect
@@ -586,39 +586,33 @@ def _transform_features_to_numbers(
     #                                          feature_min_unique_values=binary_feature_min_unique_values):
     #         selector = column_name if is_feature_multi_label(column) else [column_name]
     #         transformers.append((selector, transformer))
-    #
-    # considered_column_names = {c for t in transformers for c in (t[0] if isinstance(t[0], list) else [t[0]])}
-    # if ignored_column_names := set(df.columns) - considered_column_names:
-    #     print("Columns ignored because their type is unsupported:", ignored_column_names)
+
+    common_column_transformer_kwargs = {"n_jobs": -1, "verbose_feature_names_out": False}
 
     new_df = make_pipeline(
         make_column_transformer(
             (SimpleImputer(), make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*",
                                                    dtype_include=np.number)),
-            (OneHotEncoder(dtype=bool, sparse_output=not standardize_binary_features),
+            # Sparse output not supported by Pandas. It also complicates standardization if
+            # `standardize_binary_features` is true.
+            (OneHotEncoder(dtype=bool, sparse_output=False),
              [f for f in df.columns if is_feature_string(df[f])]),
-            (MultiLabelBinarizer(sparse_output=not standardize_binary_features),
-             [f for f in df.columns if is_feature_multi_label(df[f])]),
-            remainder="passthrough", n_jobs=-1, verbose_feature_names_out=False,
+            (MultiHotEncoder(), [f for f in df.columns if is_feature_multi_label(df[f])]),
+            remainder="passthrough", **common_column_transformer_kwargs,
+        ),
+        # We also remove useless features at a macro level:
+        # We know `int` is a binary feature because these come from multi-label binarizer, and all other that were
+        # previously ints were converted to floats because of the scaling (supposing it's scaled).  # TODO: change this.
+        make_column_transformer(
+            (SelectMinBinaryUniqueValues(binary_feature_min_unique_values),
+             make_column_selector(dtype_include=[bool, int])),
+            (VarianceThreshold(), make_column_selector(dtype_exclude=[bool, int])),
+            **common_column_transformer_kwargs,
         ),
         memory=str(Path.home() / ".cache/probing-clip-transform"), verbose=verbose,
     ).set_output(transform="pandas").fit_transform(df)
 
-    # mapper = DataFrameMapper(transformers, df_out=True)
-    #
-    # print("Transforming the features into numbers…", end="")
-    # new_df = mapper.fit_transform(df)
-    # new_df = _fix_column_names(new_df, mapper)
-    # print(" ✓")
-
-    # We also remove useless features at a macro level:
-    # We know `int` is a binary feature because these come from multi-label binarizer, and all other that were
-    # previously ints were converted to floats because of the scaling (supposing it's scaled).
-    new_df = make_column_transformer(
-        (SelectMinBinaryUniqueValues(binary_feature_min_unique_values),
-         make_column_selector(dtype_include=[bool, int])),
-        (VarianceThreshold(), make_column_selector(dtype_exclude=[bool, int])),
-        n_jobs=-1, verbose_feature_names_out=False).set_output(transform="pandas").fit_transform(new_df)
+    # TODO: print pipeline drawing.
 
     if standardize_dependent_variable:
         dependent_variable = new_df.pop(dependent_variable_name)

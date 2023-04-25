@@ -37,7 +37,7 @@ class SelectMinBinaryUniqueValues(SelectorMixin, BaseEstimator):
 
 
 class MultiHotEncoder(BaseEstimator, TransformerMixin):
-    """Wraps `MultiLabelBinarizer` in a form that can work with `ColumnTransformer`.
+    """Wraps `MultiLabelBinarizer` in a form that can work with `ColumnTransformer`. It makes it accept multiple inputs.
 
     Note that the input `X` has to be a `pandas.DataFrame`.
     """
@@ -50,14 +50,12 @@ class MultiHotEncoder(BaseEstimator, TransformerMixin):
         self.columns = []
 
     def fit(self, X: pd.DataFrame, y: Any = None) -> MultiHotEncoder:  # noqa
-        # TODO: make sure it's not fitted already.
-
         self.columns = X.columns.to_list()
 
         for column_name in X:
             binarizer = self.binarizer_creator().fit(X[column_name])
             self.binarizers.append(binarizer)
-            self.classes_.append(binarizer.classes_)
+            self.classes_.append(binarizer.classes_)  # noqa
 
         return self
 
