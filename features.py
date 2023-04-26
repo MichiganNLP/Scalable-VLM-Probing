@@ -458,7 +458,6 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
     if "spacy" not in feature_deny_list:
         docs = list(tqdm(spacy_model.pipe(df.sentence), total=len(df), desc="Parsing with spaCy"))
 
-        # TODO: should convert `None` to `np.nan`?
         df["sentence count"] = [get_sentence_count(doc) for doc in docs]
         df["noun chunk count"] = [get_noun_chunk_count(doc) for doc in docs]
         df["has any adjective"] = [has_any_adjective(doc) for doc in docs]
@@ -466,11 +465,11 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         df["has any adverb"] = [has_any_adverb(doc) for doc in docs]
 
         first_sentences = [get_first_sentence(doc) for doc in docs]
-        df["tense"] = [get_tense(sent) for sent in first_sentences]
+        df["tense"] = [get_tense(sent) or float("nan") for sent in first_sentences]
         df["is continuous"] = [is_continuous(sent) for sent in first_sentences]
         df["is perfect"] = [is_perfect(sent) for sent in first_sentences]
-        df["subject person"] = [get_subject_person(sent) for sent in first_sentences]
-        df["subject number"] = [get_subject_number(sent) for sent in first_sentences]
+        df["subject person"] = [get_subject_person(sent) or float("nan") for sent in first_sentences]
+        df["subject number"] = [get_subject_number(sent) or float("nan") for sent in first_sentences]
         df["is passive voice"] = [is_passive_voice(sent) for sent in first_sentences]
         df["root tag"] = [get_root_tag(sent) for sent in first_sentences]
         df["root pos"] = [get_root_pos(sent) for sent in first_sentences]
