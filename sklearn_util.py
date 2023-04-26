@@ -18,6 +18,9 @@ class SelectMinBinaryUniqueValues(SelectorMixin, BaseEstimator):
 
     def fit(self, X: np.ndarray, y: np.ndarray | None = None) -> SelectMinBinaryUniqueValues:  # noqa
         assert np.unique(X).size <= 2  # Only binary.
+
+        X = self._validate_data(X, ensure_2d=True)
+
         non_zero = (X != 0).sum(axis=0)  # For sparse arrays, it's efficient to check the non-zero elements.
         self.min_counts_ = np.minimum(non_zero, X.shape[0] - non_zero)
         if isinstance(self.min_counts_, np.matrix):  # Can happen with CSR matrices.
