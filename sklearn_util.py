@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, Sequence
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_selection import SelectorMixin
@@ -42,8 +43,9 @@ class MultiHotEncoder(BaseEstimator, TransformerMixin):
     Note that the input `X` has to be a `pandas.DataFrame`.
     """
 
-    def __init__(self, binarizer_creator: Callable[[], Any] | None = None) -> None:
+    def __init__(self, binarizer_creator: Callable[[], Any] | None = None, dtype: npt.DTypeLike | None = None) -> None:
         self.binarizer_creator = binarizer_creator or MultiLabelBinarizer
+        self.dtype = dtype
 
         self.binarizers = []
         self.categories_ = self.classes_ = []
@@ -66,7 +68,8 @@ class MultiHotEncoder(BaseEstimator, TransformerMixin):
             raise ValueError(f"The fit transformer deals with {len(self.classes_)} columns "
                              f"while the input has {X.shape[1]}.")
 
-        return np.concatenate([binarizer.transform(X[c]) for c, binarizer in zip(X, self.binarizers)], axis=1)
+        return np.concatenate([binarizer.transform(X[c]).astype(self.dtype)
+                               for c, binarizer in zip(X, self.binarizers)], axis=1)
 
     def get_feature_names_out(self, input_features: Sequence[str] = None) -> np.ndarray:
         check_is_fitted(self)

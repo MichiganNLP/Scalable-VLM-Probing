@@ -597,16 +597,12 @@ def _transform_features_to_numbers(
             # `standardize_binary_features` is true.
             (OneHotEncoder(dtype=bool, sparse_output=False),
              [f for f in df.columns if is_feature_string(df[f])]),
-            (MultiHotEncoder(), [f for f in df.columns if is_feature_multi_label(df[f])]),
+            (MultiHotEncoder(dtype=bool), [f for f in df.columns if is_feature_multi_label(df[f])]),
             remainder="passthrough", **common_column_transformer_kwargs,
         ),
-        # We also remove useless features at a macro level:
-        # We know `int` is a binary feature because these come from multi-label binarizer, and all other that were
-        # previously ints were converted to floats because of the scaling (supposing it's scaled).  # TODO: change this.
-        make_column_transformer(
-            (SelectMinBinaryUniqueValues(binary_feature_min_unique_values),
-             make_column_selector(dtype_include=[bool, int])),
-            (VarianceThreshold(), make_column_selector(dtype_exclude=[bool, int])),
+        make_column_transformer(  # We also remove useless features at a macro level:
+            (SelectMinBinaryUniqueValues(binary_feature_min_unique_values), make_column_selector(dtype_include=bool)),
+            (VarianceThreshold(), make_column_selector(dtype_exclude=bool)),
             **common_column_transformer_kwargs,
         ),
         memory=str(Path.home() / ".cache/probing-clip-transform"), verbose=verbose,
