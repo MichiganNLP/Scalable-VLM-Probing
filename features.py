@@ -22,9 +22,8 @@ from sentence_transformers import SentenceTransformer, util
 from sklearn.compose import make_column_selector, make_column_transformer
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.impute import SimpleImputer
-from sklearn.pipeline import Pipeline, make_pipeline
-from sklearn.preprocessing import MultiLabelBinarizer, OneHotEncoder, StandardScaler
-from sklearn_pandas import DataFrameMapper
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from tqdm.auto import tqdm, trange
 
@@ -459,6 +458,7 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
     if "spacy" not in feature_deny_list:
         docs = list(tqdm(spacy_model.pipe(df.sentence), total=len(df), desc="Parsing with spaCy"))
 
+        # TODO: should convert `None` to `np.nan`?
         df["sentence count"] = [get_sentence_count(doc) for doc in docs]
         df["noun chunk count"] = [get_noun_chunk_count(doc) for doc in docs]
         df["has any adjective"] = [has_any_adjective(doc) for doc in docs]
@@ -478,69 +478,6 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
     print("Feature computation done.")
 
     return df
-
-
-# sklearn-pandas doesn't support the new way (scikit-learn >= 1.1) some transformers output the features.
-# See https://github.com/scikit-learn-contrib/sklearn-pandas/pull/248
-def _fix_column_names(df: pd.DataFrame, mapper: DataFrameMapper) -> pd.DataFrame:
-    for columns, transformer, kwargs in mapper.built_features:
-        if (isinstance(transformer, OneHotEncoder)
-                or (isinstance(transformer, Pipeline) and any(isinstance(t, OneHotEncoder) for t in transformer))):
-            assert isinstance(columns, Iterable) and not isinstance(columns, str)
-
-            new_names = transformer.get_feature_names_out(columns)
-
-            old_name_prefix = kwargs.get("alias", "_".join(str(c) for c in columns))
-            old_names = [f"{old_name_prefix}_{i}" for i in range(len(new_names))]
-
-            df = df.rename(columns=dict(zip(old_names, new_names)))
-        elif isinstance(transformer, Pipeline) and isinstance(transformer[0], MultiLabelBinarizer):
-            # The way sklearn-pandas infers the names is by iterating the transformers and getting the names and trying
-            # to get the features names that are available from the last one that has them. Then, it checks if their
-            # length matches the output number of features. However, if the binarizer is followed by feature selection,
-            # this process fails as the previous condition is not met. So we handle it manually here.
-            assert isinstance(columns, str)
-
-            # MultiLabelBinarizer doesn't implement `get_feature_names_out`.
-            new_names = [f"{columns}_{c}" for c in transformer[0].classes_]
-
-            # We slice as an iterator and not by passing a slice to `__getitem__` because if the transformer is of type
-            # `TransformerPipeline` then it fails.
-            for t in itertools.islice(transformer, 1, None):
-                new_names = t.get_feature_names_out(new_names)
-
-            old_name_prefix = kwargs.get("alias", columns)
-            old_names = [f"{old_name_prefix}_{i}" for i in range(len(new_names))]
-
-            df = df.rename(columns=dict(zip(old_names, new_names)))
-
-    return df
-
-
-def _infer_transformer(feature: np.ndarray | pd.Series, impute_missing_values: bool = True,
-                       standardize_binary_features: bool = True, feature_min_unique_values: int = 50) -> Any:
-    transformers = None  # `None` in this context means to ignore the feature. Note it's different from `[]`.
-
-    if is_feature_binary(feature):
-        transformers = []
-    elif np.issubdtype(feature.dtype, np.number):
-        transformers = ([SimpleImputer()] if impute_missing_values else []) + [StandardScaler()]  # noqa
-    elif is_feature_string(feature):
-        transformers = [OneHotEncoder(dtype=bool, sparse_output=not standardize_binary_features)]
-    elif is_feature_multi_label(feature):
-        transformers = [MultiLabelBinarizer()]  # FIXME: ideally the output should be a bool, but it's an int.
-
-    if is_feature_multi_label(feature) or is_feature_string(feature):
-        # We remove useless sub-features early. We can only possibly do this for features that produce sub-features
-        # because otherwise we wouldn't be able to remove the only feature available.
-        transformers.append(VarianceThreshold())  # We remove the constant features.
-        transformers.append(SelectMinBinaryUniqueValues(feature_min_unique_values))
-
-    if (standardize_binary_features
-            and (is_feature_binary(feature) or is_feature_multi_label(feature) or is_feature_string(feature))):
-        transformers.append(StandardScaler())
-
-    return transformers
 
 
 def _transform_features_to_numbers(
@@ -565,50 +502,30 @@ def _transform_features_to_numbers(
             feature_count -= 1
         print("Number of features before the transformation:", feature_count)
 
-    # We have to manually remove the multi-label constant features because otherwise it fails in `VarianceThreshold`
-    # if used in the transformer mapper as some binarized multi-label features may have no sub-features left.
-    # We can't use `VarianceThreshold` directly here because it only supports numerical features.
-    # We don't check for all types of features here because it's a bit complicated to do it in a generic way.
-    if empty_multi_label_feature_names := [c
-                                           for c in df.columns
-                                           if (is_feature_multi_label(df[c])
-                                               and (df[c].transform(tuple) == tuple(df[c].iloc[0])).all())]:
-        print("Multi-label features ignored because they are constant:", empty_multi_label_feature_names)
-        df = df.drop(columns=empty_multi_label_feature_names)
-
-    # transformers: MutableSequence[Tuple] = []
-    #
-    # for column_name in df.columns:
-    #     column = df[column_name]
-    #     impute_missing_values = column_name != dependent_variable_name
-    #     if transformer := _infer_transformer(column, impute_missing_values=impute_missing_values,
-    #                                          standardize_binary_features=standardize_binary_features,
-    #                                          feature_min_unique_values=binary_feature_min_unique_values):
-    #         selector = column_name if is_feature_multi_label(column) else [column_name]
-    #         transformers.append((selector, transformer))
-
-    common_column_transformer_kwargs = {"n_jobs": -1, "verbose_feature_names_out": False}
+    common_column_transformer_kwargs = {"remainder": "passthrough", "n_jobs": -1, "verbose_feature_names_out": False}
 
     new_df = make_pipeline(
         make_column_transformer(
             (SimpleImputer(), make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*",
                                                    dtype_include=np.number)),
-            # Sparse output not supported by Pandas. It also complicates standardization if
+            # Sparse outputs are not supported by Pandas. It also complicates standardization if
             # `standardize_binary_features` is true.
             (OneHotEncoder(dtype=bool, sparse_output=False),
              [f for f in df.columns if is_feature_string(df[f])]),
             (MultiHotEncoder(dtype=bool), [f for f in df.columns if is_feature_multi_label(df[f])]),
-            remainder="passthrough", **common_column_transformer_kwargs,
+            **common_column_transformer_kwargs,
         ),
         make_column_transformer(  # We also remove useless features at a macro level:
             (SelectMinBinaryUniqueValues(binary_feature_min_unique_values), make_column_selector(dtype_include=bool)),
             (VarianceThreshold(), make_column_selector(dtype_exclude=bool)),
             **common_column_transformer_kwargs,
         ),
+        make_column_transformer(
+            (StandardScaler(), make_column_selector(dtype_exclude=None if standardize_binary_features else bool)),
+            **common_column_transformer_kwargs,
+        ),
         memory=str(Path.home() / ".cache/probing-clip-transform"), verbose=verbose,
     ).set_output(transform="pandas").fit_transform(df)
-
-    # TODO: print pipeline drawing.
 
     if standardize_dependent_variable:
         dependent_variable = new_df.pop(dependent_variable_name)
@@ -617,9 +534,9 @@ def _transform_features_to_numbers(
         new_columns = {}
         columns_to_remove = []
 
-        multi_label_original_word_feature_names = [t[0]
-                                                   for t in transformers
-                                                   if isinstance(t[0], str) and t[0].endswith("-original")]
+        multi_label_original_word_feature_names = [c
+                                                   for c in df.columns
+                                                   if isinstance(c, str) and c.endswith("-original")]
 
         for column in new_df.columns:
             if column.startswith(multi_label_original_word_feature_names):
@@ -730,16 +647,17 @@ def load_features(path: FilePath, dependent_variable_name: str, max_data_count: 
 
 
 def is_feature_binary(feature: np.ndarray | pd.Series) -> bool:
+    # TODO: doesn't work for nan.
     return feature.dtype == bool or (np.issubdtype(feature.dtype, np.number) and set(np.unique(feature)) == {0, 1})
 
 
 def is_feature_multi_label(feature: np.ndarray | pd.Series) -> bool:
     # We suppose the first one is representative to make it faster:
     x = (feature.array if isinstance(feature, pd.Series) else feature)[0]
-    return issubclass(type(x), Iterable) and not issubclass(type(x), str)
+    return issubclass(type(x), Iterable) and not issubclass(type(x), str)  # TODO: doesn't work for nan.
 
 
 def is_feature_string(feature: np.ndarray | pd.Series) -> bool:
     # We suppose the first one is representative to make it faster:
     x = (feature.array if isinstance(feature, pd.Series) else feature)[0]
-    return issubclass(type(x), str)
+    return issubclass(type(x), str)  # TODO: doesn't work for nan.
