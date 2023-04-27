@@ -653,10 +653,10 @@ def is_feature_binary(feature: np.ndarray | pd.Series) -> bool:
 def is_feature_multi_label(feature: np.ndarray | pd.Series) -> bool:
     # We suppose the first one is representative to make it faster:
     x = (feature.array if isinstance(feature, pd.Series) else feature)[0]
-    return issubclass(type(x), Iterable) and not issubclass(type(x), str)  # TODO: doesn't work for nan.
+    return isinstance(x, Iterable) and not isinstance(x, str)  # TODO: doesn't work for nan.
 
 
 def is_feature_string(feature: np.ndarray | pd.Series) -> bool:
     # We suppose the first one is representative to make it faster:
     x = (feature.array if isinstance(feature, pd.Series) else feature)[0]
-    return issubclass(type(x), str)  # TODO: doesn't work for nan.
+    return isinstance(x, str)  # TODO: doesn't work for nan.
