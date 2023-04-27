@@ -520,6 +520,7 @@ def _transform_features_to_numbers(
             (StandardScaler(), make_column_selector(dtype_exclude=None if standardize_binary_features else bool)),
             **common_column_transformer_kwargs,
         ),
+        # TODO: make an imputer that supports bools.
         make_column_transformer(
             (SimpleImputer(strategy="mean"), make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*",
                                                                   dtype_include=np.number)),
