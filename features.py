@@ -7,6 +7,7 @@ import re
 import string
 import warnings
 from collections import Counter, defaultdict
+from math import isnan
 from pathlib import Path
 from typing import Any, Callable, Collection, Iterable, Literal, Mapping, Sequence, Tuple, get_args
 
@@ -646,17 +647,25 @@ def load_features(path: FilePath, dependent_variable_name: str, max_data_count: 
 
 
 def is_feature_binary(feature: np.ndarray | pd.Series) -> bool:
-    # TODO: doesn't work for nan.
+    # FIXME: not sure if it works with NaNs.
     return feature.dtype == bool or (np.issubdtype(feature.dtype, np.number) and set(np.unique(feature)) == {0, 1})
 
 
 def is_feature_multi_label(feature: np.ndarray | pd.Series) -> bool:
-    # We suppose the first one is representative to make it faster:
-    x = (feature.array if isinstance(feature, pd.Series) else feature)[0]
-    return isinstance(x, Iterable) and not isinstance(x, str)  # TODO: doesn't work for nan.
+    if isinstance(feature, pd.Series):
+        feature = feature.to_numpy()
+
+    # We suppose the first one is representative to make it faster.
+    # We check it's a float first because otherwise `isnan` may fail for other types (e.g., `list`).
+    x = next((x for x in feature if not (isinstance(x, float) and isnan(x))), None)
+    return isinstance(x, Iterable) and not isinstance(x, str)
 
 
 def is_feature_string(feature: np.ndarray | pd.Series) -> bool:
-    # We suppose the first one is representative to make it faster:
-    x = (feature.array if isinstance(feature, pd.Series) else feature)[0]
-    return isinstance(x, str)  # TODO: doesn't work for nan.
+    if isinstance(feature, pd.Series):
+        feature = feature.to_numpy()
+
+    # We suppose the first one is representative to make it faster.
+    # We check it's a float first because otherwise `isnan` may fail for other types (e.g., `list`).
+    x = next((x for x in feature if not (isinstance(x, float) and isnan(x))), None)
+    return isinstance(x, str)
