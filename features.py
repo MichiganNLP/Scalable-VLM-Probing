@@ -7,7 +7,6 @@ import re
 import string
 import warnings
 from collections import Counter, defaultdict
-from math import isnan
 from pathlib import Path
 from typing import Any, Callable, Collection, Iterable, Literal, Mapping, Sequence, Tuple, get_args
 
@@ -506,15 +505,12 @@ def _transform_features_to_numbers(
 
     new_df = make_pipeline(
         make_column_transformer(
-            (SimpleImputer(), make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*",
-                                                   dtype_include=np.number)),
-            # Sparse outputs are not supported by Pandas. It also complicates standardization if
-            # `standardize_binary_features` is true.
-            (OneHotEncoder(dtype=bool, sparse_output=False),
-             [f for f in df.columns if is_feature_string(df[f])]),
+            # Sparse outputs are not supported by Pandas. It also complicates standardization if applied.
+            (OneHotEncoder(dtype=bool, sparse_output=False), [f for f in df.columns if is_feature_string(df[f])]),
             (MultiHotEncoder(dtype=bool), [f for f in df.columns if is_feature_multi_label(df[f])]),
             **common_column_transformer_kwargs,
         ),
+        # TODO: remove more generally: those that have the most common value more than N - F times.
         make_column_transformer(  # We also remove useless features at a macro level:
             (SelectMinBinaryUniqueValues(binary_feature_min_unique_values), make_column_selector(dtype_include=bool)),
             (VarianceThreshold(), make_column_selector(dtype_exclude=bool)),
@@ -522,6 +518,13 @@ def _transform_features_to_numbers(
         ),
         make_column_transformer(
             (StandardScaler(), make_column_selector(dtype_exclude=None if standardize_binary_features else bool)),
+            **common_column_transformer_kwargs,
+        ),
+        make_column_transformer(
+            (SimpleImputer(strategy="mean"), make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*",
+                                                                  dtype_include=np.number)),
+            # `SimpleImputer` doesn't support bools.
+            (SimpleImputer(strategy="most_frequent"), make_column_selector(dtype_exclude=[bool, np.number])),
             **common_column_transformer_kwargs,
         ),
         memory=str(Path.home() / ".cache/probing-clip-transform"), verbose=verbose,
@@ -646,26 +649,18 @@ def load_features(path: FilePath, dependent_variable_name: str, max_data_count: 
     return raw_features, features, dependent_variable
 
 
-def is_feature_binary(feature: np.ndarray | pd.Series) -> bool:
-    # FIXME: not sure if it works with NaNs.
-    return feature.dtype == bool or (np.issubdtype(feature.dtype, np.number) and set(np.unique(feature)) == {0, 1})
+def is_feature_binary(feature: pd.Series) -> bool:
+    return (feature.dtype == bool
+            or (feature.dtype == object and set(np.unique(feature)) - {np.nan} == {False, True})
+            or (np.issubdtype(feature.dtype, np.number) and set(np.unique(feature)) == {0, 1}))
 
 
-def is_feature_multi_label(feature: np.ndarray | pd.Series) -> bool:
-    if isinstance(feature, pd.Series):
-        feature = feature.to_numpy()
-
-    # We suppose the first one is representative to make it faster.
-    # We check it's a float first because otherwise `isnan` may fail for other types (e.g., `list`).
-    x = next((x for x in feature if not (isinstance(x, float) and isnan(x))), None)
+def is_feature_multi_label(feature: pd.Series) -> bool:
+    # To make it faster, we suppose the first one is representative.
+    x = next(iter(feature[~feature.isna()]), None)
     return isinstance(x, Iterable) and not isinstance(x, str)
 
 
-def is_feature_string(feature: np.ndarray | pd.Series) -> bool:
-    if isinstance(feature, pd.Series):
-        feature = feature.to_numpy()
-
-    # We suppose the first one is representative to make it faster.
-    # We check it's a float first because otherwise `isnan` may fail for other types (e.g., `list`).
-    x = next((x for x in feature if not (isinstance(x, float) and isnan(x))), None)
-    return isinstance(x, str)
+def is_feature_string(feature: pd.Series) -> bool:
+    # To make it faster, we suppose the first one is representative.
+    return isinstance(next(iter(feature[~feature.isna()]), None), str)
