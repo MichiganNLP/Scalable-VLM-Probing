@@ -20,10 +20,10 @@ from nltk.stem import PorterStemmer, WordNetLemmatizer
 from pandas._typing import FilePath
 from pandas.core.dtypes.inference import is_bool, is_float
 from sentence_transformers import SentenceTransformer, util
+from sklearn.pipeline import Pipeline
 from sklearn.compose import make_column_selector, make_column_transformer
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.impute import SimpleImputer
-from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from tqdm.auto import tqdm, trange
@@ -498,24 +498,24 @@ def _transform_features_to_numbers(
 
     common_column_transformer_kwargs = {"remainder": "passthrough", "n_jobs": -1, "verbose_feature_names_out": False}
 
-    new_df = make_pipeline(
-        make_column_transformer(
+    new_df = Pipeline([
+        ("encoder", make_column_transformer(
             # Sparse outputs are not supported by Pandas. It also complicates standardization if applied.
             (OneHotEncoder(dtype=bool, sparse_output=False), [f for f in df.columns if is_feature_string(df[f])]),
             (MultiHotEncoder(dtype=bool), [f for f in df.columns if is_feature_multi_label(df[f])]),
             **common_column_transformer_kwargs,  # TODO: add an issue to make `MultiLabelBinarizer` support `dtype`.
-        ),
+        )),
         # TODO: remove more generally: those that have the most common value more than N - F times.
-        make_column_transformer(  # We also remove useless features at a macro level:
+        ("filter", make_column_transformer(
             (SelectMinBinaryUniqueValues(binary_feature_min_unique_values), make_column_selector(dtype_include=bool)),
             (VarianceThreshold(), make_column_selector(dtype_exclude=bool)),
             **common_column_transformer_kwargs,
-        ),
-        make_column_transformer(
+        )),
+        ("scaler", make_column_transformer(
             (StandardScaler(), make_column_selector(dtype_exclude=None if standardize_binary_features else bool)),
             **common_column_transformer_kwargs,
-        ),
-        make_column_transformer(
+        )),
+        ("imputer", make_column_transformer(
             (SimpleImputer(strategy="mean"), make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*",
                                                                   dtype_include=np.number)),
             (BoolImputer(strategy="most_frequent"),
@@ -523,8 +523,8 @@ def _transform_features_to_numbers(
             (SimpleImputer(strategy="most_frequent"),
              make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*", dtype_exclude=[bool, np.number])),
             **common_column_transformer_kwargs,
-        ),
-        memory=str(Path.home() / ".cache/probing-clip-transform"), verbose=verbose,
+        )),
+    ], memory=str(Path.home() / ".cache/probing-clip-transform"), verbose=verbose
     ).set_output(transform="pandas").fit_transform(df)
 
     if standardize_dependent_variable:
