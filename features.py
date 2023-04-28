@@ -508,7 +508,7 @@ def _transform_features_to_numbers(
             # Sparse outputs are not supported by Pandas. It also complicates standardization if applied.
             (OneHotEncoder(dtype=bool, sparse_output=False), [f for f in df.columns if is_feature_string(df[f])]),
             (MultiHotEncoder(dtype=bool), [f for f in df.columns if is_feature_multi_label(df[f])]),
-            **common_column_transformer_kwargs,
+            **common_column_transformer_kwargs,  # TODO: add an issue to make `MultilabelBinarizer` support `dtype=bool`.
         ),
         # TODO: remove more generally: those that have the most common value more than N - F times.
         make_column_transformer(  # We also remove useless features at a macro level:
@@ -524,7 +524,7 @@ def _transform_features_to_numbers(
         make_column_transformer(
             (SimpleImputer(strategy="mean"), make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*",
                                                                   dtype_include=np.number)),
-            # `SimpleImputer` doesn't support bools.
+            # `SimpleImputer` doesn't support bools. See https://github.com/scikit-learn/scikit-learn/issues/26292
             (SimpleImputer(strategy="most_frequent"), make_column_selector(dtype_exclude=[bool, np.number])),
             **common_column_transformer_kwargs,
         ),
