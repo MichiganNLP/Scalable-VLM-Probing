@@ -13,6 +13,7 @@ from typing import Any, Callable, Collection, Iterable, Literal, Mapping, Sequen
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from datasets import load_dataset
 from huggingface_hub import snapshot_download
 from nltk.corpus import wordnet as wn
 from nltk.stem import PorterStemmer, WordNetLemmatizer
@@ -47,7 +48,6 @@ PATH_LEVIN_VERBS = PATH_DATA_FOLDER / "levin_verbs.txt"
 PATH_LEVIN_SEMANTIC_BROAD = PATH_DATA_FOLDER / "levin_semantic_broad.json"
 PATH_LIWC = PATH_DATA_FOLDER / "LIWC.2015.all.txt"
 PATH_GENERAL_INQ = PATH_DATA_FOLDER / "inquirer_augmented.xls"
-PATH_CONCRETENESS = PATH_DATA_FOLDER / "concreteness.txt"
 PATH_WORD_FREQUENCIES = PATH_DATA_FOLDER / "words_counter_LAION.json"
 
 text_model = SentenceTransformer("all-MiniLM-L6-v2")
@@ -249,7 +249,7 @@ def _parse_liwc_file(path: FilePath = PATH_LIWC, verbose: bool = True) -> Mappin
             liwc_categories.add(category)
 
     if verbose:
-        print(f"Total number of LIWC categories:", len(liwc_categories))
+        print("Total number of LIWC categories:", len(liwc_categories))
 
     return dict_liwc
 
@@ -262,14 +262,9 @@ def _get_liwc_category(word: str, dict_liwc: Mapping[str, Sequence[str]]) -> Col
             for category in categories}
 
 
-def _parse_concreteness_file(path: FilePath = PATH_CONCRETENESS) -> Mapping[str, float]:
-    dict_concreteness = {}
-    with open(path) as file:
-        next(file)  # Skip the first line.
-        for line in file:
-            word, _, concreteness_m, _, _, _, _, _, _ = line.split("	")
-            dict_concreteness[word] = float(concreteness_m)
-    return dict_concreteness
+def _get_concreteness_dict() -> Mapping[str, float]:
+    return {word_dict["Word"]: word_dict["Conc.M"]  # noqa
+            for word_dict in load_dataset("martingrzzler/conreteness_ratings", split="train")}  # noqa
 
 
 def _get_concreteness_score(word: str, dict_concreteness: Mapping[str, float]) -> float:
@@ -406,7 +401,7 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
                                        compute_neg_features=compute_neg_features)
 
     if "concreteness" not in feature_deny_list:
-        dict_concreteness = _parse_concreteness_file()
+        dict_concreteness = _get_concreteness_dict()
         _compute_feature_for_each_word(df, "concreteness", lambda w, _: _get_concreteness_score(w, dict_concreteness),
                                        compute_neg_features=compute_neg_features)
 
@@ -508,7 +503,7 @@ def _transform_features_to_numbers(
             # Sparse outputs are not supported by Pandas. It also complicates standardization if applied.
             (OneHotEncoder(dtype=bool, sparse_output=False), [f for f in df.columns if is_feature_string(df[f])]),
             (MultiHotEncoder(dtype=bool), [f for f in df.columns if is_feature_multi_label(df[f])]),
-            **common_column_transformer_kwargs,  # TODO: add an issue to make `MultilabelBinarizer` support `dtype=bool`.
+            **common_column_transformer_kwargs,  # TODO: add an issue to make `MultiLabelBinarizer` support `dtype`.
         ),
         # TODO: remove more generally: those that have the most common value more than N - F times.
         make_column_transformer(  # We also remove useless features at a macro level:
