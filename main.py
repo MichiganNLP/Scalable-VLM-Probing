@@ -248,7 +248,7 @@ def compute_mean_diff_and_corr(features: pd.DataFrame, dependent_variable: pd.Se
             lower_bound[feature_name] = score[feature_name] - half_interval_size
             upper_bound[feature_name] = score[feature_name] + half_interval_size
         elif np.issubdtype(feature.dtype, np.number):
-            coef_type[feature_name] = "corr"
+            coef_type[feature_name] = "pear"
 
             corr_result = stats.pearsonr(feature, dependent_variable)
             score[feature_name] = corr_result.statistic
