@@ -43,6 +43,7 @@ class SelectMinBinaryUniqueValues(SelectorMixin, BaseEstimator):
         return mask
 
 
+# See https://github.com/scikit-learn/scikit-learn/issues/11309#issuecomment-1528042914
 class MultiHotEncoder(BaseEstimator, TransformerMixin):
     """Wraps `MultiLabelBinarizer` in a form that can work with `ColumnTransformer`. It makes it accept multiple inputs.
 

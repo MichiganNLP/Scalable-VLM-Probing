@@ -503,7 +503,7 @@ def _transform_features_to_numbers(
             # Sparse outputs are not supported by Pandas. It also complicates standardization if applied.
             (OneHotEncoder(dtype=bool, sparse_output=False), [f for f in df.columns if is_feature_string(df[f])]),
             (MultiHotEncoder(dtype=bool), [f for f in df.columns if is_feature_multi_label(df[f])]),
-            **common_column_transformer_kwargs,  # TODO: add an issue to make `MultiLabelBinarizer` support `dtype`.
+            **common_column_transformer_kwargs,
         )),
         # TODO: remove more generally: those that have the most common value more than N - F times.
         ("filter", make_column_transformer(
