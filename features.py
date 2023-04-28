@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import itertools
 import json
-import re
 import string
 import warnings
 from collections import Counter, defaultdict
@@ -20,15 +19,14 @@ from nltk.stem import PorterStemmer, WordNetLemmatizer
 from pandas._typing import FilePath
 from pandas.core.dtypes.inference import is_bool, is_float
 from sentence_transformers import SentenceTransformer, util
-from sklearn.pipeline import Pipeline
 from sklearn.compose import make_column_selector, make_column_transformer
-from sklearn.feature_selection import VarianceThreshold
 from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from tqdm.auto import tqdm, trange
 
-from sklearn_util import BoolImputer, MultiHotEncoder, SelectMinBinaryUniqueValues
+from sklearn_util import BoolImputer, MultiHotEncoder, SelectMinNonMostFrequentValues
 from spacy_features import create_model, get_first_sentence, get_noun_chunk_count, get_root_pos, get_root_tag, \
     get_sentence_count, get_subject_number, get_subject_person, get_tense, has_any_adjective, has_any_adverb, \
     has_any_gerund, is_continuous, is_passive_voice, is_perfect
@@ -476,9 +474,12 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
 
 def _transform_features_to_numbers(
         df: pd.DataFrame, dependent_variable_name: str, standardize_dependent_variable: bool = True,
-        standardize_binary_features: bool = True, binary_feature_min_unique_values: int = 50,
+        standardize_binary_features: bool = True, min_non_most_frequent_values: int = 50,
         compute_neg_features: bool = True, merge_original_and_replacement_features: bool = True,
         add_constant_feature: bool = False, verbose: bool = True) -> Tuple[pd.DataFrame, pd.Series]:
+    if df[dependent_variable_name].isna().any():
+        raise ValueError("The dependent variable contains NaN values.")
+
     df = df.copy()
 
     if not standardize_dependent_variable:
@@ -496,32 +497,26 @@ def _transform_features_to_numbers(
             feature_count -= 1
         print("Number of features before the transformation:", feature_count)
 
-    common_column_transformer_kwargs = {"remainder": "passthrough", "n_jobs": -1, "verbose_feature_names_out": False}
+    common_column_transformer_kwargs = {"n_jobs": -1, "verbose_feature_names_out": False}
 
     new_df = Pipeline([
         ("encoder", make_column_transformer(
             # Sparse outputs are not supported by Pandas. It also complicates standardization if applied.
             (OneHotEncoder(dtype=bool, sparse_output=False), [f for f in df.columns if is_feature_string(df[f])]),
             (MultiHotEncoder(dtype=bool), [f for f in df.columns if is_feature_multi_label(df[f])]),
+            remainder="passthrough",
             **common_column_transformer_kwargs,
         )),
-        # TODO: remove more generally: those that have the most common value more than N - F times.
-        ("filter", make_column_transformer(
-            (SelectMinBinaryUniqueValues(binary_feature_min_unique_values), make_column_selector(dtype_include=bool)),
-            (VarianceThreshold(), make_column_selector(dtype_exclude=bool)),
-            **common_column_transformer_kwargs,
-        )),
+        ("filter", SelectMinNonMostFrequentValues(min_non_most_frequent_values)),
         ("scaler", make_column_transformer(
             (StandardScaler(), make_column_selector(dtype_exclude=None if standardize_binary_features else bool)),
+            remainder="passthrough",
             **common_column_transformer_kwargs,
         )),
         ("imputer", make_column_transformer(
-            (SimpleImputer(strategy="mean"), make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*",
-                                                                  dtype_include=np.number)),
-            (BoolImputer(strategy="most_frequent"),
-             make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*", dtype_include=bool)),
-            (SimpleImputer(strategy="most_frequent"),
-             make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*", dtype_exclude=[bool, np.number])),
+            (SimpleImputer(strategy="mean"), make_column_selector(dtype_include=np.number)),
+            (BoolImputer(strategy="most_frequent"), make_column_selector(dtype_include=bool)),
+            remainder=SimpleImputer(strategy="most_frequent"),
             **common_column_transformer_kwargs,
         )),
     ], verbose=verbose).set_output(transform="pandas").fit_transform(df)
@@ -578,7 +573,7 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
                               compute_neg_features: bool = True, levin_return_mode: LevinReturnMode = "all",
                               compute_similarity_features: bool = True,
                               merge_original_and_replacement_features: bool = True,
-                              add_constant_feature: bool = False, binary_feature_min_unique_values: int = 50,
+                              add_constant_feature: bool = False, min_non_most_frequent_values: int = 50,
                               standardize_dependent_variable: bool = True, standardize_binary_features: bool = True,
                               verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     raw_features = _compute_features(clip_results, feature_deny_list=feature_deny_list,
@@ -588,7 +583,7 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
     features, dependent_variable = _transform_features_to_numbers(
         raw_features, dependent_variable_name, standardize_dependent_variable=standardize_dependent_variable,
         standardize_binary_features=standardize_binary_features,
-        binary_feature_min_unique_values=binary_feature_min_unique_values, compute_neg_features=compute_neg_features,
+        min_non_most_frequent_values=min_non_most_frequent_values, compute_neg_features=compute_neg_features,
         merge_original_and_replacement_features=merge_original_and_replacement_features,
         add_constant_feature=add_constant_feature, verbose=verbose)
 
@@ -601,7 +596,7 @@ def load_features(path: FilePath, dependent_variable_name: str, max_data_count: 
                   levin_return_mode: LevinReturnMode = "all", compute_similarity_features: bool = True,
                   merge_original_and_replacement_features: bool = True, add_constant_feature: bool = False,
                   remove_correlated_features: bool = True, feature_correlation_keep_threshold: float = .8,
-                  do_vif: bool = False, binary_feature_min_unique_values: int = 50,
+                  do_vif: bool = False, min_non_most_frequent_values: int = 50,
                   verbose: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     clip_results = _load_clip_results(path)
     raw_features, features, dependent_variable = _compute_numeric_features(
@@ -610,7 +605,7 @@ def load_features(path: FilePath, dependent_variable_name: str, max_data_count: 
         standardize_binary_features=standardize_binary_features, compute_neg_features=compute_neg_features,
         levin_return_mode=levin_return_mode, compute_similarity_features=compute_similarity_features,
         merge_original_and_replacement_features=merge_original_and_replacement_features,
-        add_constant_feature=add_constant_feature, binary_feature_min_unique_values=binary_feature_min_unique_values,
+        add_constant_feature=add_constant_feature, min_non_most_frequent_values=min_non_most_frequent_values,
         verbose=verbose)
 
     if remove_correlated_features:

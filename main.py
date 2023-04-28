@@ -278,7 +278,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dependent-variable-name")
     parser.add_argument("-r", "--remove-features", dest="feature_deny_list", nargs="+",
                         default={"wup-similarity", "lch-similarity", "path-similarity"})
-    parser.add_argument("--binary-feature-min-unique-values", type=int, default=100)
+    parser.add_argument("--min-non-most-frequent-values", type=int, default=100,
+                        help="The minimum number of values that have to be different from the most frequent one.")
     parser.add_argument("--no-neg-features", dest="compute_neg_features", action="store_false")
     parser.add_argument("--levin-return-mode", choices=VALID_LEVIN_RETURN_MODES, default="semantic_fine_grained")
     parser.add_argument("--merge-original-and-replacement-features", action="store_true")
@@ -302,7 +303,7 @@ def parse_args() -> argparse.Namespace:
     assert args.max_data_count is None or not args.debug, "Cannot specify max data count in debug mode."
     args.max_data_count = 1000 if args.debug else args.max_data_count
 
-    args.binary_feature_min_unique_values = 10 if args.debug else args.binary_feature_min_unique_values
+    args.min_non_most_frequent_values = 10 if args.debug else args.min_non_most_frequent_values
 
     args.dependent_variable_name = (args.dependent_variable_name
                                     or ("clip_score_diff" if args.model in REGRESSION_MODELS else "clip prediction"))
@@ -332,7 +333,7 @@ def main() -> None:
         merge_original_and_replacement_features=args.merge_original_and_replacement_features,
         remove_correlated_features=args.remove_correlated_features,
         feature_correlation_keep_threshold=args.feature_correlation_keep_threshold, do_vif=args.do_vif,
-        binary_feature_min_unique_values=args.binary_feature_min_unique_values)
+        min_non_most_frequent_values=args.min_non_most_frequent_values)
 
     if args.model in {"ols", "ridge", "lasso"}:
         regularization = {"ols": None}.get(args.model, args.model)

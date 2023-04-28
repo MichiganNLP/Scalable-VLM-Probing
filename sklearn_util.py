@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any, Callable, Sequence
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+from overrides import overrides
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_selection import SelectorMixin
 from sklearn.impute import SimpleImputer
@@ -14,31 +16,48 @@ from sklearn.utils import _is_pandas_na, is_scalar_nan
 from sklearn.utils.validation import FLOAT_DTYPES, check_is_fitted
 
 
-class SelectMinBinaryUniqueValues(SelectorMixin, BaseEstimator):
-    def __init__(self, binary_feature_min_unique_values: int = 50, leave_at_least_one: bool = True) -> None:
-        self.binary_feature_min_unique_values = binary_feature_min_unique_values
+class SelectMinNonMostFrequentValues(SelectorMixin, BaseEstimator):
+    """Select features with at least `min_non_most_frequent_values` values different from the most frequent value."""
+
+    def __init__(self, min_non_most_frequent_values: int = 50, leave_at_least_one: bool = True) -> None:
+        self.min_non_most_frequent_values = min_non_most_frequent_values
         self.leave_at_least_one = leave_at_least_one
 
-    def fit(self, X: np.ndarray, y: np.ndarray | None = None) -> SelectMinBinaryUniqueValues:  # noqa
-        assert np.unique(X).size <= 2  # Only binary.
+    def fit(self, X: np.ndarray, y: np.ndarray | None = None) -> SelectMinNonMostFrequentValues:  # noqa
+        X = self._validate_data(X, ensure_2d=True, force_all_finite="allow-nan")
 
-        X = self._validate_data(X, ensure_2d=True)
+        self.non_most_frequent_counts_ = np.empty(X.shape[1], dtype=np.int64)  # noqa
 
-        non_zero = (X != 0).sum(axis=0)  # For sparse arrays, it's efficient to check the non-zero elements.
-        self.min_counts_ = np.minimum(non_zero, X.shape[0] - non_zero)
-        if isinstance(self.min_counts_, np.matrix):  # Can happen with CSR matrices.
-            self.min_counts_ = self.min_counts_.A1  # noqa
+        for i, column in enumerate(X.transpose()):
+            two_most_common_list = Counter(column).most_common(2)
+
+            if len(two_most_common_list) <= 1:
+                self.non_most_frequent_counts_[i] = 0
+            else:
+                if np.isnan(most_freq_value := two_most_common_list[0][0]):
+                    most_freq_value = two_most_common_list[1][0]
+
+                self.non_most_frequent_counts_[i] = ((column != most_freq_value) & (column != np.nan)).sum()  # noqa
+
         return self
 
+    @overrides
+    def transform(self, X: np.ndarray) -> np.ndarray:
+        # We don't change `X` because the data types may be changed.
+        _ = self._validate_data(X, ensure_2d=True, dtype=None, accept_sparse="csr", force_all_finite="allow-nan",
+                                reset=False)
+        return self._transform(X)
+
+    @overrides
     def _get_support_mask(self) -> np.ndarray:
         check_is_fitted(self)
-        mask = self.min_counts_ >= self.binary_feature_min_unique_values
+        mask = self.non_most_frequent_counts_ >= self.min_non_most_frequent_values
 
         if self.leave_at_least_one and not mask.any():
             # We do this because, with sklearn-pandas, when we use a `MultiLabelBinarizer` (because they are
             # transformed one by one), there may be no features left afterward and the next transformers in the
             # pipeline may fail for that multi-label feature.
-            mask[self.min_counts_.argmax()] = True
+            mask[self.non_most_frequent_counts_.argmax()] = True
 
         return mask
 
@@ -98,10 +117,11 @@ class BoolImputer(SimpleImputer):
     It doesn't crash when there aren't any missing values. See https://github.com/scikit-learn/scikit-learn/issues/26292
     """
 
+    @overrides
     def _validate_input(self, X, in_fit):
         if self.strategy in ("most_frequent", "constant"):
             # If input is a list of strings, dtype = object.
-            # Otherwise ValueError is raised in SimpleImputer
+            # Otherwise, ValueError is raised in SimpleImputer
             # with strategy='most_frequent' or 'constant'
             # because the list is converted to Unicode numpy array
             if isinstance(X, list) and any(
