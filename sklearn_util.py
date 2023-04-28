@@ -7,8 +7,11 @@ import numpy.typing as npt
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_selection import SelectorMixin
+from sklearn.impute import SimpleImputer
+from sklearn.impute._base import _check_inputs_dtype
 from sklearn.preprocessing import MultiLabelBinarizer
-from sklearn.utils.validation import check_is_fitted
+from sklearn.utils import _is_pandas_na, is_scalar_nan
+from sklearn.utils.validation import FLOAT_DTYPES, check_is_fitted
 
 
 class SelectMinBinaryUniqueValues(SelectorMixin, BaseEstimator):
@@ -86,3 +89,71 @@ class MultiHotEncoder(BaseEstimator, TransformerMixin):
                              f" got {len(input_features)}")
 
         return np.asarray([input_features[i] + "_" + str(t) for i in range(len(cats)) for t in cats[i]])
+
+
+class BoolImputer(SimpleImputer):
+    """Impute missing values from a boolean array.
+
+    It doesn't crash when there aren't any missing values. See https://github.com/scikit-learn/scikit-learn/issues/26292
+    """
+
+    def _validate_input(self, X, in_fit):
+        if self.strategy in ("most_frequent", "constant"):
+            # If input is a list of strings, dtype = object.
+            # Otherwise ValueError is raised in SimpleImputer
+            # with strategy='most_frequent' or 'constant'
+            # because the list is converted to Unicode numpy array
+            if isinstance(X, list) and any(
+                isinstance(elem, str) for row in X for elem in row
+            ):
+                dtype = object
+            else:
+                dtype = None
+        else:
+            dtype = FLOAT_DTYPES
+
+        if not in_fit and self._fit_dtype.kind == "O":
+            # Use object dtype if fitted on object dtypes
+            dtype = self._fit_dtype
+
+        if _is_pandas_na(self.missing_values) or is_scalar_nan(self.missing_values):
+            force_all_finite = "allow-nan"
+        else:
+            force_all_finite = True
+
+        try:
+            X = self._validate_data(
+                X,
+                reset=in_fit,
+                accept_sparse="csc",
+                dtype=dtype,
+                force_all_finite=force_all_finite,
+                copy=self.copy,
+            )
+        except ValueError as ve:
+            if "could not convert" in str(ve):
+                new_ve = ValueError(
+                    "Cannot use {} strategy with non-numeric data:\n{}".format(
+                        self.strategy, ve
+                    )
+                )
+                raise new_ve from None
+            else:
+                raise ve
+
+        if in_fit:
+            # Use the dtype seen in `fit` for non-`fit` conversion
+            self._fit_dtype = X.dtype
+
+        _check_inputs_dtype(X, self.missing_values)
+        if X.dtype.kind not in ("b", "i", "u", "f", "O"):  # The change to support boolean arrays is here.
+            raise ValueError(
+                "SimpleImputer does not support data with dtype "
+                "{0}. Please provide either a numeric array (with"
+                " a floating point or integer dtype) or "
+                "categorical data represented either as an array "
+                "with integer dtype or an array of string values "
+                "with an object dtype.".format(X.dtype)
+            )
+
+        return X

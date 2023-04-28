@@ -28,7 +28,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from tqdm.auto import tqdm, trange
 
-from sklearn_util import MultiHotEncoder, SelectMinBinaryUniqueValues
+from sklearn_util import BoolImputer, MultiHotEncoder, SelectMinBinaryUniqueValues
 from spacy_features import create_model, get_first_sentence, get_noun_chunk_count, get_root_pos, get_root_tag, \
     get_sentence_count, get_subject_number, get_subject_person, get_tense, has_any_adjective, has_any_adverb, \
     has_any_gerund, is_continuous, is_passive_voice, is_perfect
@@ -515,12 +515,13 @@ def _transform_features_to_numbers(
             (StandardScaler(), make_column_selector(dtype_exclude=None if standardize_binary_features else bool)),
             **common_column_transformer_kwargs,
         ),
-        # TODO: make an imputer that supports bools.
         make_column_transformer(
             (SimpleImputer(strategy="mean"), make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*",
                                                                   dtype_include=np.number)),
-            # `SimpleImputer` doesn't support bools. See https://github.com/scikit-learn/scikit-learn/issues/26292
-            (SimpleImputer(strategy="most_frequent"), make_column_selector(dtype_exclude=[bool, np.number])),
+            (BoolImputer(strategy="most_frequent"),
+             make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*", dtype_include=bool)),
+            (SimpleImputer(strategy="most_frequent"),
+             make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*", dtype_exclude=[bool, np.number])),
             **common_column_transformer_kwargs,
         ),
         memory=str(Path.home() / ".cache/probing-clip-transform"), verbose=verbose,
