@@ -524,8 +524,8 @@ def _transform_features_to_numbers(
              make_column_selector(rf"^(?!{re.escape(dependent_variable_name)}$).*", dtype_exclude=[bool, np.number])),
             **common_column_transformer_kwargs,
         )),
-    ], memory=str(Path.home() / ".cache/probing-clip-transform"), verbose=verbose
-    ).set_output(transform="pandas").fit_transform(df)
+    ], verbose=verbose).set_output(transform="pandas").fit_transform(df)
+    # We tried setting the `memory` param, however it seems to take a lot of time to serialize the data.
 
     if standardize_dependent_variable:
         dependent_variable = new_df.pop(dependent_variable_name)
