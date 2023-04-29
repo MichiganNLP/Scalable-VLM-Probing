@@ -54,9 +54,6 @@ class SelectMinNonMostFrequentValues(SelectorMixin, BaseEstimator):
         mask = self.non_most_frequent_counts_ >= self.min_non_most_frequent_values
 
         if self.leave_at_least_one and not mask.any():
-            # We do this because, with sklearn-pandas, when we use a `MultiLabelBinarizer` (because they are
-            # transformed one by one), there may be no features left afterward and the next transformers in the
-            # pipeline may fail for that multi-label feature.
             mask[self.non_most_frequent_counts_.argmax()] = True
 
         return mask
