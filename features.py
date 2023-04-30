@@ -507,7 +507,14 @@ def _transform_features_to_numbers(
             remainder="passthrough",
             **common_column_transformer_kwargs,
         )),
-        ("filter", SelectMinNonMostFrequentValues(min_non_most_frequent_values)),
+        ("filter", make_column_transformer(
+            # Pass a separate copy of the same type of transformer to bools because the output bool dtype is otherwise
+            # lost. See https://github.com/scikit-learn/scikit-learn/issues/25560
+            (SelectMinNonMostFrequentValues(min_non_most_frequent_values), make_column_selector(dtype_include=bool)),
+            # `set_output` is not passed to the `remainder` transformer.
+            # See https://github.com/scikit-learn/scikit-learn/issues/26306
+            remainder=SelectMinNonMostFrequentValues(min_non_most_frequent_values).set_output(transform="pandas"),
+            **common_column_transformer_kwargs)),
         ("scaler", make_column_transformer(
             (StandardScaler(), make_column_selector(dtype_exclude=None if standardize_binary_features else bool)),
             remainder="passthrough",
@@ -516,7 +523,9 @@ def _transform_features_to_numbers(
         ("imputer", make_column_transformer(
             (SimpleImputer(strategy="mean"), make_column_selector(dtype_include=np.number)),
             (BoolImputer(strategy="most_frequent"), make_column_selector(dtype_include=bool)),
-            remainder=SimpleImputer(strategy="most_frequent"),
+            # `set_output` is not passed to the `remainder` transformer.
+            # See https://github.com/scikit-learn/scikit-learn/issues/26306
+            remainder=SimpleImputer(strategy="most_frequent").set_output(transform="pandas"),
             **common_column_transformer_kwargs,
         )),
     ], verbose=verbose).set_output(transform="pandas").fit_transform(df)

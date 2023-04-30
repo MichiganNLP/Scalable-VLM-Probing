@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Callable, Sequence
+from numbers import Real
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 import numpy.typing as npt
@@ -13,17 +14,24 @@ from sklearn.impute import SimpleImputer
 from sklearn.impute._base import _check_inputs_dtype
 from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn.utils import _is_pandas_na, is_scalar_nan
+from sklearn.utils._param_validation import Interval
 from sklearn.utils.validation import FLOAT_DTYPES, check_is_fitted
 
 
 class SelectMinNonMostFrequentValues(SelectorMixin, BaseEstimator):
     """Select features with at least `min_non_most_frequent_values` values different from the most frequent value."""
 
+    _parameter_constraints: Mapping[str, Iterable[Any]] = {
+        "min_non_most_frequent_values": [Interval(Real, 0, None, closed="left")],
+        "leave_at_least_one": ["boolean"],
+    }
+
     def __init__(self, min_non_most_frequent_values: int = 50, leave_at_least_one: bool = True) -> None:
         self.min_non_most_frequent_values = min_non_most_frequent_values
         self.leave_at_least_one = leave_at_least_one
 
     def fit(self, X: np.ndarray, y: np.ndarray | None = None) -> SelectMinNonMostFrequentValues:  # noqa
+        self._validate_params()
         X = self._validate_data(X, ensure_2d=True, force_all_finite="allow-nan")
 
         self.non_most_frequent_counts_ = np.empty(X.shape[1], dtype=np.int64)  # noqa
@@ -42,13 +50,6 @@ class SelectMinNonMostFrequentValues(SelectorMixin, BaseEstimator):
         return self
 
     @overrides
-    def transform(self, X: np.ndarray) -> np.ndarray:
-        # We don't change `X` because the data types may be changed.
-        _ = self._validate_data(X, ensure_2d=True, dtype=None, accept_sparse="csr", force_all_finite="allow-nan",
-                                reset=False)
-        return self._transform(X)
-
-    @overrides
     def _get_support_mask(self) -> np.ndarray:
         check_is_fitted(self)
         mask = self.non_most_frequent_counts_ >= self.min_non_most_frequent_values
@@ -57,6 +58,10 @@ class SelectMinNonMostFrequentValues(SelectorMixin, BaseEstimator):
             mask[self.non_most_frequent_counts_.argmax()] = True
 
         return mask
+
+    @overrides
+    def _more_tags(self) -> Mapping[str, Any]:
+        return {"allow_nan": True}
 
 
 # See https://github.com/scikit-learn/scikit-learn/issues/11309#issuecomment-1528042914
