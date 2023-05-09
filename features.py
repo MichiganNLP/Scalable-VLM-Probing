@@ -589,12 +589,22 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
                                      max_data_count=max_data_count, compute_neg_features=compute_neg_features,
                                      levin_return_mode=levin_return_mode,
                                      compute_similarity_features=compute_similarity_features)
+
+    if verbose:
+        print("Features before the transformation:")
+        print(raw_features.describe(include="all").transpose().astype({"count": int}).to_string())
+
     features, dependent_variable = _transform_features_to_numbers(
         raw_features, dependent_variable_name, standardize_dependent_variable=standardize_dependent_variable,
         standardize_binary_features=standardize_binary_features,
         min_non_most_frequent_values=min_non_most_frequent_values, compute_neg_features=compute_neg_features,
         merge_original_and_replacement_features=merge_original_and_replacement_features,
         add_constant_feature=add_constant_feature, verbose=verbose)
+
+    if verbose:
+        print()
+        print("Features after the transformation:")
+        print(features.describe(include="all").transpose().astype({"count": int}).to_string())
 
     return raw_features, features, dependent_variable
 
