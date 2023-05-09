@@ -106,7 +106,7 @@ def _load_clip_results(path: FilePath) -> pd.DataFrame:
     df.loc[:, "neg_triplet"] = df.apply(lambda row: _get_sentence_match_triplet(row.neg_triplet, row.neg_sentence),
                                         axis=1)
 
-    df.neg_type = df.neg_type.str.get(0)
+    df.neg_type = pd.Categorical(df.neg_type.str.get(0))
     assert df.neg_type.isin(VALID_NEG_TYPES).all()
 
     df["clip prediction"] = df["clip prediction"] == "pos"
@@ -303,7 +303,7 @@ def _get_common_words(triplet: Triplet, neg_type: NegType) -> Collection[str]:
 
 
 def _get_common_words_pos(neg_type: NegType) -> Collection[Pos]:
-    return [_neg_type_to_pos(other_neg_type) for other_neg_type in VALID_NEG_TYPES if other_neg_type != neg_type]
+    return tuple(_neg_type_to_pos(other_neg_type) for other_neg_type in VALID_NEG_TYPES if other_neg_type != neg_type)
 
 
 def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable[[str, Pos], Any],
@@ -356,12 +356,16 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         df["word-original"] = df.apply(lambda row: _get_changed_word(row.pos_triplet, row["neg-type"]), axis=1)
         df["word-replacement"] = df.apply(lambda row: _get_changed_word(row.neg_triplet, row["neg-type"]), axis=1)
         df["words-common"] = df.apply(lambda row: _get_common_words(row.pos_triplet, row["neg-type"]), axis=1)
-        df["words-common-pos"] = df["neg-type"].map(_get_common_words_pos)
+        # Cast to `str` because the categories are indices mapped as multi-indices (because the function returns
+        # multiple values for each input value), and it fails to check `isna` internally.
+        # See https://github.com/pandas-dev/pandas/issues/51488.
+        df["words-common-pos"] = pd.Categorical(df["neg-type"].astype(str).map(_get_common_words_pos))
     else:
         # TODO: don't call them "words-common" if there are no negative features, it's confusing.
         #   Maybe change it to "words-pos"?
         df["words-common"] = df.pos_triplet
-        df["words-common-pos"] = [[_neg_type_to_pos(neg_type) for neg_type in VALID_NEG_TYPES]] * len(df)
+        df["words-common-pos"] = pd.Categorical([tuple(_neg_type_to_pos(neg_type)
+                                                       for neg_type in VALID_NEG_TYPES)] * len(df))
 
     for i in range(len(df["words-common"].iloc[0])):
         df[f"words-common-{i}"] = df["words-common"].str[i]
@@ -458,11 +462,11 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         df["has any adverb"] = [has_any_adverb(doc) for doc in docs]
 
         first_sentences = [get_first_sentence(doc) for doc in docs]
-        df["tense"] = [get_tense(sent) or float("nan") for sent in first_sentences]
+        df["tense"] = pd.Categorical([get_tense(sent) or float("nan") for sent in first_sentences])
         df["is continuous"] = [is_continuous(sent) for sent in first_sentences]
         df["is perfect"] = [is_perfect(sent) for sent in first_sentences]
-        df["subject person"] = [get_subject_person(sent) or float("nan") for sent in first_sentences]
-        df["subject number"] = [get_subject_number(sent) or float("nan") for sent in first_sentences]
+        df["subject person"] = pd.Categorical([get_subject_person(sent) or float("nan") for sent in first_sentences])
+        df["subject number"] = pd.Categorical([get_subject_number(sent) or float("nan") for sent in first_sentences])
         df["is passive voice"] = [is_passive_voice(sent) for sent in first_sentences]
         df["root tag"] = [get_root_tag(sent) for sent in first_sentences]
         df["root pos"] = [get_root_pos(sent) for sent in first_sentences]
