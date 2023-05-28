@@ -118,15 +118,18 @@ def _neg_type_to_pos(neg_type: NegType) -> Pos:
     return "v" if neg_type == "v" else "n"  # noqa
 
 
-def _parse_general_inq_file(path: FilePath = PATH_GENERAL_INQ) -> Mapping[str, Collection[str]]:
+def _parse_general_inq_file(path: FilePath = PATH_GENERAL_INQ, verbose: bool = True) -> Mapping[str, Collection[str]]:
     data = pd.read_excel(path, index_col=0)
-    dict_general = defaultdict(list)
+    word_to_classes = defaultdict(list)
     for class_name in list(data.columns)[1:-2]:
         for word in data[class_name][1:].index:
             if not is_float(data[class_name][word]) and not is_bool(word):
-                dict_general[word.lower()].append(class_name)
-    print("Total # of General Inquirer classes:", len(dict_general.keys()))
-    return dict_general
+                word_to_classes[word.lower()].append(class_name)
+
+    if verbose:
+        print("Total # of General Inquirer classes:", len(word_to_classes))
+
+    return word_to_classes
 
 
 def _get_general_inquirer_category(word: str, dict_general: Mapping[str, Collection[str]]) -> Collection[str]:
@@ -337,8 +340,8 @@ def _compute_feature_for_each_word(df: pd.DataFrame, prefix: str, func: Callable
 
 def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[str] = (),
                       max_data_count: int | None = None, compute_neg_features: bool = True,
-                      levin_return_mode: LevinReturnMode = "all",
-                      compute_similarity_features: bool = True) -> pd.DataFrame:
+                      levin_return_mode: LevinReturnMode = "all", compute_similarity_features: bool = True,
+                      verbose: bool = True) -> pd.DataFrame:
     print("Computing all the features…")
 
     if max_data_count:
@@ -371,17 +374,17 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
         df[f"words-common-{i}"] = df["words-common"].str[i]
 
     if "Levin" not in feature_deny_list:
-        dict_levin = _parse_levin_file(return_mode=levin_return_mode)
+        dict_levin = _parse_levin_file(return_mode=levin_return_mode, verbose=verbose)
         _compute_feature_for_each_word(df, "Levin", lambda w, pos: _get_levin_category(w, dict_levin, pos),
                                        compute_neg_features=compute_neg_features)
 
     if "LIWC" not in feature_deny_list:
-        dict_liwc = _parse_liwc_file()
+        dict_liwc = _parse_liwc_file(verbose=verbose)
         _compute_feature_for_each_word(df, "LIWC", lambda w, _: _get_liwc_category(w, dict_liwc),
                                        compute_neg_features=compute_neg_features)
 
     if "GeneralINQ" not in feature_deny_list:
-        dict_general = _parse_general_inq_file()
+        dict_general = _parse_general_inq_file(verbose=verbose)
         _compute_feature_for_each_word(df, "GeneralINQ", lambda w, _: _get_general_inquirer_category(w, dict_general),
                                        compute_neg_features=compute_neg_features)
 
@@ -592,7 +595,7 @@ def _compute_numeric_features(clip_results: pd.DataFrame, dependent_variable_nam
     raw_features = _compute_features(clip_results, feature_deny_list=feature_deny_list,
                                      max_data_count=max_data_count, compute_neg_features=compute_neg_features,
                                      levin_return_mode=levin_return_mode,
-                                     compute_similarity_features=compute_similarity_features)
+                                     compute_similarity_features=compute_similarity_features, verbose=verbose)
 
     if verbose:
         print("Features before the transformation:")
