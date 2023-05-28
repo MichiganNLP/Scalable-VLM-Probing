@@ -1,26 +1,23 @@
+from collections import defaultdict
+from typing import Mapping, Sequence
+
 import pandas as pd
-from pandas.core.dtypes.inference import is_float, is_bool
+from pandas.core.dtypes.inference import is_bool, is_float
 
 
-def read_generalinq():
-    data = pd.read_excel('/home/oana/Desktop/CLIP_Probes/GeneralInquirel/inquireraugmented.xls', index_col=0)
+def read_general_inq(path: str = "data/inquireraugmented.xls") -> Mapping[str, Sequence[str]]:
+    data = pd.read_excel(path, index_col=0)
     classes = list(data.columns)
-    dict_general = {}
+    word_to_classes = defaultdict(list)
     for class_name in classes[1:-2]:
-        words = [word.lower() for word in data[class_name][1:].index if not is_float(data[class_name][word]) and not is_bool(word)]
-        for word in words:
-            if word not in dict_general:
-                dict_general[word] = []
-            dict_general[word].append(class_name)
-    return dict_general
+        for word in data[class_name][1:].index:
+            if not is_float(data[class_name][word]) and not is_bool(word):
+                word_to_classes[word.lower()].append(class_name)
+    return word_to_classes
 
-def read_rouge():
-    return
 
 def main() -> None:
-    dict_general = read_generalinq()
-    dict_rouge = read_rouge()
-    print(dict_rouge)
+    print(read_general_inq())
 
 
 if __name__ == "__main__":
