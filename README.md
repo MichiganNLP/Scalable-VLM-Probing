@@ -12,9 +12,3 @@ python -c "import nltk; nltk.download(['omw-1.4', 'wordnet'])"
 spacy download en_core_web_trf
 huggingface-cli login
 ```
-
-## Open a console on Great Lakes
-
-```bash
-salloc --partition=standard --account=mihalcea98 --cpus-per-task=36 --mem=180G
-```
