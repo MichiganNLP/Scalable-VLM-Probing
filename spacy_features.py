@@ -1,4 +1,4 @@
-# This module can be a project available on GitHub and [spaCy Universe](https://spacy.io/universe).
+# This module could be a project available on GitHub and [spaCy Universe](https://spacy.io/universe).
 # People could use it from `sent._.[attr]`.
 from __future__ import annotations
 

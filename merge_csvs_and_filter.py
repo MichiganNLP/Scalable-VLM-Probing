@@ -8,8 +8,8 @@ from argparse_with_defaults import ArgumentParserWithDefaults
 
 def parse_args() -> argparse.Namespace:
     parser = ArgumentParserWithDefaults()
-    parser.add_argument("--probes_path", default="data/svo_probes.csv")
-    parser.add_argument("--neg_path", default="data/neg_d.csv")
+    parser.add_argument("--probes-path", default="data/svo_probes.csv")
+    parser.add_argument("--neg-path", default="data/neg_d.csv")
     return parser.parse_args()
 
 
