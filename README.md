@@ -1,6 +1,10 @@
-# CLIP_SVO-Probes
+# Scalable VLM Probing
 
 Probing CLIP on SVO-Probes.
+
+## Overview
+
+![Example instance](images/task_description.jpg)
 
 ## Setup
 
