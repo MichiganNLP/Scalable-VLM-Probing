@@ -23,3 +23,5 @@ spacy download en_core_web_trf
 huggingface-cli login
 mkdir data
 ```
+
+**We will post more instructions soon.**
