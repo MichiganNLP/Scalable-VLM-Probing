@@ -27,3 +27,20 @@ mkdir data
 ```
 
 **We will post more instructions soon.**
+
+## Citation
+
+```bibtex
+@inproceedings{castro-etal-2023-scalable,
+    title = "Scalable Performance Analysis for Vision-Language Models",
+    author = "Castro, Santiago  and
+      Ignat, Oana  and
+      Mihalcea, Rada",
+    booktitle = "Proceedings of the 12th Joint Conference on Lexical and Computational Semantics",
+    month = jul,
+    year = "2023",
+    address = "Toronto, Canada",
+    publisher = "Association for Computational Linguistics",
+    abstract = "Joint vision-language models have shown great performance over a diverse set of tasks. However, little is known about their limitations, as the high dimensional space learned by these models makes it difficult to identify semantic errors. Recent work has addressed this problem by designing highly controlled probing task benchmarks. Our paper introduces a more scalable solution that relies on already annotated benchmarks. Our method consists of extracting a large set of diverse features from a vision-language benchmark and measuring their correlation with the output of the target model. We confirm previous findings that CLIP behaves like a bag of words model and performs better with nouns and verbs; we also uncover novel insights such as CLIP getting confused by concrete words. Our framework is available at this https URL and can be used with other multimodal models and benchmarks.",
+}
+```
