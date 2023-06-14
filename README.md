@@ -1,6 +1,8 @@
 # Scalable VLM Probing
 
-In this work, we proposed a simple and effective method to **probe vision-language models**. 
+[[Paper]](https://arxiv.org/pdf/2305.18786.pdf)
+
+In this work, we propose a simple and effective method to **probe vision-language models**. 
 
 Our method is **scalable**, as it does not require data annotation and makes use of existing datasets. 
 With our method, we analyzed the performance of **CLIP**, a popular state-of-the-art multi-modal model, on the **SVO-Probes** benchmark. 
