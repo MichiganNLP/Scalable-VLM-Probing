@@ -35,20 +35,24 @@ above) for an explanation of the results.
 2. Compute the CLIP scores for each image-sentence pair and save it to a CSV file. For this step, we used [a Google
     Colab](https://colab.research.google.com/drive/1I10mjHD-_brEtaKdHqhvkHjRFjVzK1hl?usp=sharing). You can see the
     results in [this Google Sheet](https://docs.google.com/spreadsheets/d/1TPYLRk_f6zMm7pYy8xLPeeS6EsybSCoxjnONOrg40vA/edit?usp=sharing).
-    This file is available in a CSV format at [TODO](todo). Place it under `data/svo_probes_with_scores.csv`.
+    [This file is available to
+    download](https://huggingface.co/datasets/MichiganNLP/scalable_vlm_probing/blob/main/svo_probes_with_scores.csv).
+    Place it at `data/svo_probes_with_scores.csv`.
 3. Compute a CSV file that contains the negative sentences for each of the negative triplets. We lost the script for
     this step, but it's about taking the previous CSV file as input and taking the sentence for the same triplet in the
     `pos_triplet` column (you can use [the original SVO-Probes file](https://github.com/deepmind/svo_probes/blob/main/svo_probes.csv)
     if there are missing sentences). This file should have the columns `sentence` and `neg_sentence`, in the same order
-    as the column `sentence` from the previous CSV file. We provide this file already processed at [TODO](todo).
-    Place it under `data/neg_d.csv`.
+    as the column `sentence` from the previous CSV file. We provide [this file already
+    processed](https://huggingface.co/datasets/MichiganNLP/scalable_vlm_probing/blob/main/neg_d.csv). Place it at
+    `data/neg_d.csv`.
 4. Merge the information from this 2 files:
 
     ```bash
     ./merge_csvs_and_filter.py > data/merged.csv
     ```
 
-    We provide the output of this script at [TODO](todo).
+    Here we provide [the output of this command ready to
+    download](https://huggingface.co/datasets/MichiganNLP/scalable_vlm_probing/blob/main/merged.csv).
 
 5. Compute word frequencies in a 10M-size subset from [LAION-400M](https://laion.ai/blog/laion-400-open-dataset/):
 
@@ -56,7 +60,8 @@ above) for an explanation of the results.
     ./compute_word_frequencies.py > data/words_counter_LAION.json
     ```
 
-    We provide the output of this script at [TODO](todo).
+    We provide [the output of this command ready to
+    download](https://huggingface.co/datasets/MichiganNLP/scalable_vlm_probing/blob/main/words_counter_LAION.json).
 
 6. TODO: how to obtain Levin.
 7. Obtain LIWC 2015. See [LIWC website](https://www.liwc.app/) for more information.
