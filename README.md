@@ -70,8 +70,8 @@ above) for an explanation of the results.
     export LIWC_URL_OR_PATH=...
     ```
 
-    You can also disable the LIWC features by using the flag `--remove-features` along with other features, such as the
-    default removed ones: `--remove-features LIWC wup-similarity lch-similarity path-similarity`.
+    You can also disable the LIWC features in the next command by using the flag `--remove-features` along with other
+    features, such as the default removed ones: `--remove-features LIWC wup-similarity lch-similarity path-similarity`.
 
 7. Run the following to obtain the resulting correlation scores and save them as files:
 
