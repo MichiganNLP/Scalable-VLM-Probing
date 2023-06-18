@@ -66,7 +66,7 @@ above) for an explanation of the results.
 6. TODO: how to obtain Levin.
 7. Obtain LIWC 2015. See [LIWC website](https://www.liwc.app/) for more information.
 8. TODO: how to obtain the General Inquirer.
-9. Run the following:
+9. Run the following to obtain the resulting correlation scores and save them as files:
 
     ```bash
     ./main.py --dependent-variable-name pos_clip_score --no-neg-features > results/pos_scores.txt
@@ -74,7 +74,7 @@ above) for an explanation of the results.
     ./main.py --dependent-variable-name clip_score_diff > results/score_diff.txt
     ```
 
-    We provide these files already under [results/](results). By default, this script takes our own `merged.csv` file as
+    We already provide these files under [results/](results). By default, this script takes our own `merged.csv` file as
     input, but you can provide your own by using `--input-path data/merged.csv`. The same happens for other files. Run
     `./main.py --help` to see all the available options. We also recommend you looking at the code to see what it does.
     Note that this repository includes code for preliminary experiments that we didn't report in the paper (for clarity)
