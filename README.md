@@ -50,14 +50,16 @@ mkdir data
     year = "2023",
     address = "Toronto, Canada",
     publisher = "Association for Computational Linguistics",
-    abstract = "Joint vision-language models have shown great performance over a diverse set of tasks. However,
-    little is known about their limitations, as the high dimensional space learned by these models makes it difficult
-    to identify semantic errors. Recent work has addressed this problem by designing highly controlled probing task
-    benchmarks. Our paper introduces a more scalable solution that relies on already annotated benchmarks. Our method
-    consists of extracting a large set of diverse features from a vision-language benchmark and measuring their
-    correlation with the output of the target model. We confirm previous findings that CLIP behaves like a bag of words
-    model and performs better with nouns and verbs; we also uncover novel insights such as CLIP getting confused by
-    concrete words. Our framework is available at https://github.com/MichiganNLP/Scalable-VLM-Probing a and can be used
-    with other multimodal models and benchmarks.",
+    abstract = "Joint vision-language models have shown great performance over a diverse set of
+    tasks. However, little is known about their limitations, as the high dimensional space learned
+    by these models makes it difficult to identify semantic errors. Recent work has addressed this
+    problem by designing highly controlled probing task benchmarks. Our paper introduces a more
+    scalable solution that relies on already annotated benchmarks. Our method consists of
+    extracting a large set of diverse features from a vision-language benchmark and measuring
+    their correlation with the output of the target model. We confirm previous findings that CLIP
+    behaves like a bag of words model and performs better with nouns and verbs; we also uncover
+    novel insights such as CLIP getting confused by concrete words. Our framework is available
+    at https://github.com/MichiganNLP/Scalable-VLM-Probing a and can be used with other
+    multimodal models and benchmarks.",
 }
 ```
