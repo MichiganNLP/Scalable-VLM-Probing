@@ -397,7 +397,7 @@ def main() -> None:
         top_df = pd.concat([df.iloc[:top_k], df[-top_k:]])
 
         df_to_plot = top_df.reset_index(names="feature")
-        # Hack to get error bars (just one datapoint per feature would not call the function):
+        # Hack to get error bars (just one datapoint per feature wouldn't call the function):
         df_to_plot = pd.concat([df_to_plot, df_to_plot], ignore_index=True)
 
         def _error_bar(x: pd.Series) -> Tuple[float, float]:
