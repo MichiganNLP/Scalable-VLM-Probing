@@ -18,24 +18,60 @@ models.
 ## Obtained Results
 
 Under [results/](results) you can find the detailed results obtained with our method for the 3 different scores tested
-(read the paper for details). They come from the output of running the code in this repository (see below to reproduce
-it).
+(read the paper for more information). They come from the output of running the code in this repository (see below to
+reproduce it).
 
 ## Reproducing the Results
 
-### Setup
+1. With Python >= 3.8, run the following commands:
 
-With Python >= 3.8, run the following commands:
+    ```bash
+    pip install -r requirements.txt
+    python -c "import nltk; nltk.download(['omw-1.4', 'wordnet'])"
+    spacy download en_core_web_trf
+    mkdir data
+    ````
 
-```bash
-pip install -r requirements.txt
-python -c "import nltk; nltk.download(['omw-1.4', 'wordnet'])"
-spacy download en_core_web_trf
-huggingface-cli login
-mkdir data
-```
+2. Compute the CLIP scores for each image-sentence pair and save it to a CSV file. For this step, we used [a Google
+    Colab](https://colab.research.google.com/drive/1I10mjHD-_brEtaKdHqhvkHjRFjVzK1hl?usp=sharing). You can see the
+    results in [this Google Sheet](https://docs.google.com/spreadsheets/d/1TPYLRk_f6zMm7pYy8xLPeeS6EsybSCoxjnONOrg40vA/edit?usp=sharing).
+    This file is available in a CSV format at [TODO](todo). Place it under `data/svo_probes_with_scores.csv`.
+3. Compute a CSV file that contains the negative sentences for each of the negative triplets. We lost the script for
+    this step, but it's about taking the previous CSV file as input and taking the sentence for the same triplet in the
+    `pos_triplet` column (you can use [the original SVO-Probes file](https://github.com/deepmind/svo_probes/blob/main/svo_probes.csv)
+    if there are missing sentences). This file should have the columns `sentence` and `neg_sentence`, in the same order
+    as the column `sentence` from the previous CSV file. We provide this file already processed at [TODO](todo).
+    Place it under `data/neg_d.csv`.
+4. Merge the information from this 2 files:
 
-**We'll write more instructions soon.**
+    ```bash
+    ./merge_csvs_and_filter.py > data/merged.csv
+    ```
+
+    We provide the output of this script at [TODO](todo).
+
+5. Compute word frequencies in a 10M-size subset from [LAION-400M](https://laion.ai/blog/laion-400-open-dataset/):
+
+    ```bash
+    ./compute_word_frequencies.py > data/words_counter_LAION.json
+    ```
+
+    We provide the output of this script at [TODO](todo).
+
+6. TODO: how to obtain Levin.
+7. TODO: how to obtain LIWC.
+8. TODO: how to obtain the General Inquirer.
+9. Run the following:
+
+    ```bash
+    ./main.py --dependent-variable-name pos_clip_score --no-neg-features > results/pos_scores.txt
+    ./main.py --dependent-variable-name neg_clip_score > results/neg_scores.txt
+    ./main.py --dependent-variable-name clip_score_diff > results/score_diff.txt
+    ```
+
+    We provide this files already under [results/](results). Run `./main.py --help` to see all the available options.
+    We also recommend you looking at the code to see what it does. Note that this repository includes code for
+    preliminary experiments that we didn't report in the paper (for clarity) and we include here in case it's useful.
 
 ## Citation
 

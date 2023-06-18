@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+"""Script to compute CLIP scores for other datasets. Not used for the paper results."""
 from __future__ import annotations
 
 import argparse

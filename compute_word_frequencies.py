@@ -16,7 +16,7 @@ def load_laion_texts() -> Iterable[str]:
 
 
 def main() -> None:
-    max_count = 10_000_000  # This is a reasonable number, and it's also roughly what LAION's 1st parquet file has.
+    max_count = 10_000_000  # This is a reasonable number, and it's also roughly what LAION's 1st Parquet file has.
     word_counts = Counter(word
                           for text in tqdm(itertools.islice(load_laion_texts(), max_count), total=max_count)
                           for word in text.split())
