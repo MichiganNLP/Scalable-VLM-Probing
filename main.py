@@ -277,7 +277,10 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--dependent-variable-name")
     parser.add_argument("-r", "--remove-features", dest="feature_deny_list", nargs="+",
-                        default={"wup-similarity", "lch-similarity", "path-similarity"})
+                        default={"wup-similarity", "lch-similarity", "path-similarity"},
+                        choices={"concreteness", "frequency", "GeneralINQ", "hypernym", "hypernym/indirect",
+                                 "lch-similarity", "Levin", "LIWC", "nb-synsets", "number-of-words", "path-similarity",
+                                 "spacy", "text-similarity", "word-similarity", "wup-similarity"})
     parser.add_argument("--min-non-most-frequent-values", type=int, default=100,
                         help="The minimum number of values that have to be different from the most frequent one.")
     parser.add_argument("--no-neg-features", dest="compute_neg_features", action="store_false")

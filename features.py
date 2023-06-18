@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import itertools
 import json
+import os
 import string
 import warnings
 from collections import Counter, defaultdict
@@ -12,6 +13,7 @@ from typing import Any, Callable, Collection, Iterable, Literal, Mapping, Sequen
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from cached_path import cached_path
 from datasets import load_dataset
 from huggingface_hub import snapshot_download
 from nltk.corpus import wordnet as wn
@@ -40,13 +42,14 @@ LevinReturnMode = Literal["alternation", "semantic_broad", "semantic_fine_graine
 VALID_NEG_TYPES = get_args(NegType)
 VALID_LEVIN_RETURN_MODES = get_args(LevinReturnMode)
 
-PATH_DATA_FOLDER = Path(snapshot_download("MichiganNLP/probing-clip", repo_type="dataset"))
-
-PATH_LEVIN_VERBS = PATH_DATA_FOLDER / "levin_verbs.txt"
-PATH_LEVIN_SEMANTIC_BROAD = PATH_DATA_FOLDER / "levin_semantic_broad.json"
-PATH_LIWC = PATH_DATA_FOLDER / "LIWC.2015.all.txt"
-PATH_GENERAL_INQ = PATH_DATA_FOLDER / "inquirer_augmented.xls"
+PATH_DATA_FOLDER = Path(snapshot_download("MichiganNLP/scalable_vlm_probing", repo_type="dataset"))
 PATH_WORD_FREQUENCIES = PATH_DATA_FOLDER / "words_counter_LAION.json"
+
+PATH_LEVIN_VERBS = cached_path("https://huggingface.co/datasets/MichiganNLP/levin_verbs/raw/main/levin_verbs.txt")
+PATH_LEVIN_SEMANTIC_BROAD = cached_path(
+    "https://huggingface.co/datasets/MichiganNLP/levin_verbs/raw/main/levin_semantic_broad.json")
+
+PATH_GENERAL_INQ = cached_path("https://inquirer.sites.fas.harvard.edu/inquireraugmented.xls")
 
 text_model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -239,11 +242,19 @@ def _get_frequency(word: str, word_frequencies: Mapping[str, int]) -> int:
     return word_frequencies.get(word, 0)
 
 
-def _parse_liwc_file(path: FilePath = PATH_LIWC, verbose: bool = True) -> Mapping[str, Sequence[str]]:
+def _parse_liwc_file(verbose: bool = True) -> Mapping[str, Sequence[str]]:
     dict_liwc = defaultdict(list)
     liwc_categories = set()
 
-    with open(path) as file:
+    url_or_path = os.environ.get("LIWC_URL_OR_PATH")
+
+    if not url_or_path:
+        raise ValueError("The environment variable LIWC_URL_OR_PATH must be set to use LIWC."
+                         " To disable LIWC, use the flag `--remove-features`, also including any other feature that you"
+                         " want to remove. To remove LIWC along with the default removed features, use:"
+                         " `--remove-features LIWC wup-similarity lch-similarity path-similarity`.")
+
+    with open(cached_path(url_or_path)) as file:
         for line in file:
             word, category = (w.strip() for w in line.strip().split(","))
             dict_liwc[word].append(category)
@@ -352,7 +363,7 @@ def _compute_features(clip_results: pd.DataFrame, feature_deny_list: Collection[
     # We use the underscore to separate a feature name from its value if it's binarized.
     df = df.rename(columns={"neg_type": "neg-type"})
 
-    if "number of words" not in feature_deny_list:
+    if "number-of-words" not in feature_deny_list:
         df["number of words"] = df.sentence.str.split().str.len()
 
     if compute_neg_features:

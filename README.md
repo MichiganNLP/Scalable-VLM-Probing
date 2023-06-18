@@ -63,10 +63,17 @@ above) for an explanation of the results.
     We provide [the output of this command ready to
     download](https://huggingface.co/datasets/MichiganNLP/scalable_vlm_probing/blob/main/words_counter_LAION.json).
 
-6. TODO: how to obtain Levin.
-7. Obtain LIWC 2015. See [LIWC website](https://www.liwc.app/) for more information.
-8. TODO: how to obtain the General Inquirer.
-9. Run the following to obtain the resulting correlation scores and save them as files:
+6. Obtain LIWC 2015. See [LIWC website](https://www.liwc.app/) for more information. Set the path or URL of the file
+    `LIWC.2015.all.txt` in the environment variable `LIWC_URL_OR_PATH`:
+    
+    ```bash
+    export LIWC_URL_OR_PATH=...
+    ```
+
+    You can also disable the LIWC features by using the flag `--remove-features` along with other features, such as the
+    default removed ones: `--remove-features LIWC wup-similarity lch-similarity path-similarity`.
+
+7. Run the following to obtain the resulting correlation scores and save them as files:
 
     ```bash
     ./main.py --dependent-variable-name pos_clip_score --no-neg-features > results/pos_scores.txt
