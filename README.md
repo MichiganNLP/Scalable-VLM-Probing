@@ -15,6 +15,8 @@ We hope our work contributes to ongoing efforts to discover the limitations of m
 robust and reliable systems. Our framework can be easily used to analyze other benchmarks, features, and multi-modal
 models.
 
+This repository includes the obtained results along with the code to reproduce them.
+
 ## Obtained Results
 
 Under [results/](results) you can find the detailed results obtained with our method for the 3 different scores tested.
