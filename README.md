@@ -51,7 +51,7 @@ above) for an explanation of the results.
     ./merge_csvs_and_filter.py > data/merged.csv
     ```
 
-    Here we provide [the output of this command ready to
+    We provide [the output of this command ready to
     download](https://huggingface.co/datasets/MichiganNLP/scalable_vlm_probing/blob/main/merged.csv).
 
 5. Compute word frequencies in a 10M-size subset from [LAION-400M](https://laion.ai/blog/laion-400-open-dataset/):
