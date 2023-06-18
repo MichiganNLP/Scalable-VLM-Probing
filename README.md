@@ -15,6 +15,15 @@ We hope our work contributes to ongoing efforts to discover the limitations of m
 robust and reliable systems. Our framework can be easily used to analyze other benchmarks, features, and multi-modal
 models.
 
+For more information, read our [*SEM 2023](https://sites.google.com/view/starsem2023) paper:
+
+[Scalable Performance Analysis for Vision-Language Models](https://arxiv.org/pdf/2305.18786.pdf)
+
+By [Santiago Castro](https://santi.uy/)+, [Oana Ignat](https://oanaignat.github.io/)+, and
+[Rada Mihalcea](https://web.eecs.umich.edu/~mihalcea/).
+
+(+ equal contribution.)
+
 This repository includes the obtained results along with the code to reproduce them.
 
 ## Obtained Results
