@@ -2,19 +2,28 @@
 
 [[Paper]](https://arxiv.org/pdf/2305.18786.pdf)
 
-In this work, we propose a simple and effective method to **probe vision-language models**. 
+In this work, we propose a simple and effective method to **probe vision-language models** (VLMs). 
 
 Our method is **scalable**, as it does not require data annotation and makes use of existing datasets. 
-With our method, we analyzed the performance of **CLIP**, a popular state-of-the-art multi-modal model, on the **SVO-Probes** benchmark. 
+With our method, we analyzed the performance of [CLIP](https://openai.com/research/clip), a popular state-of-the-art
+multi-modal model, on the [SVO-Probes](https://github.com/deepmind/svo_probes) benchmark. 
 
-We hope our work contributes to ongoing efforts to discover the limitations of multi-modal models and help build more robust and reliable systems. 
-Our framework can be easily used to analyze other benchmarks, features, and multi-modal models
+![A description of our probing method, showing 2 images being input to CLIP, then 3 scores being computed. Different
+kind of features are used to compute their correlation with each of the scores.](images/task_overview.png)
 
-<p style="text-align:center">
-    <img src="images/task_overview.png" alt="A description of our probing method, showing 2 images being input to clip, then 3 scores being computed. Different kind of features are used to compute their correlation with each of the scores.">
-</p>
+We hope our work contributes to ongoing efforts to discover the limitations of multi-modal models and help build more
+robust and reliable systems. Our framework can be easily used to analyze other benchmarks, features, and multi-modal
+models.
 
-## Setup
+## Obtained Results
+
+Under [results/](results) you can find the detailed results obtained with our method for the 3 different scores tested
+(read the paper for details). They come from the output of running the code in this repository (see below to reproduce
+it).
+
+## Reproducing the Results
+
+### Setup
 
 With Python >= 3.8, run the following commands:
 
@@ -26,7 +35,7 @@ huggingface-cli login
 mkdir data
 ```
 
-**We will post more instructions soon.**
+**We'll write more instructions soon.**
 
 ## Citation
 
