@@ -19,7 +19,7 @@ models.
 
 For more information, read our [*SEM 2023](https://sites.google.com/view/starsem2023) paper:
 
-[Scalable Performance Analysis for Vision-Language Models](https://arxiv.org/pdf/2305.18786.pdf)
+[Scalable Performance Analysis for Vision-Language Models](https://aclanthology.org/2023.starsem-1.26.pdf)
 
 By [Santiago Castro](https://santi.uy/)+, [Oana Ignat](https://oanaignat.github.io/)+, and
 [Rada Mihalcea](https://web.eecs.umich.edu/~mihalcea/).
